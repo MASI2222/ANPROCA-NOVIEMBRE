@@ -1,0 +1,1793 @@
+<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>ANPROCA · Plataforma ERP · TMS · WMS · BI</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;700&display=swap" rel="stylesheet">
+<script>(function(){var D={};D['QR8bitByte']=function(module,exports,require){var QRMode = require('./QRMode');
+
+function QR8bitByte(data) {
+	this.mode = QRMode.MODE_8BIT_BYTE;
+	this.data = data;
+}
+
+QR8bitByte.prototype = {
+
+	getLength : function() {
+		return this.data.length;
+	},
+	
+	write : function(buffer) {
+		for (var i = 0; i < this.data.length; i++) {
+			// not JIS ...
+			buffer.put(this.data.charCodeAt(i), 8);
+		}
+	}
+};
+
+module.exports = QR8bitByte;
+
+};D['QRBitBuffer']=function(module,exports,require){function QRBitBuffer() {
+	this.buffer = [];
+	this.length = 0;
+}
+
+QRBitBuffer.prototype = {
+
+	get : function(index) {
+		var bufIndex = Math.floor(index / 8);
+		return ( (this.buffer[bufIndex] >>> (7 - index % 8) ) & 1) == 1;
+	},
+	
+	put : function(num, length) {
+		for (var i = 0; i < length; i++) {
+			this.putBit( ( (num >>> (length - i - 1) ) & 1) == 1);
+		}
+	},
+	
+	getLengthInBits : function() {
+		return this.length;
+	},
+	
+	putBit : function(bit) {
+	
+		var bufIndex = Math.floor(this.length / 8);
+		if (this.buffer.length <= bufIndex) {
+			this.buffer.push(0);
+		}
+	
+		if (bit) {
+			this.buffer[bufIndex] |= (0x80 >>> (this.length % 8) );
+		}
+	
+		this.length++;
+	}
+};
+
+module.exports = QRBitBuffer;
+
+};D['QRErrorCorrectLevel']=function(module,exports,require){module.exports = {
+	L : 1,
+	M : 0,
+	Q : 3,
+	H : 2
+};
+
+
+};D['QRMaskPattern']=function(module,exports,require){module.exports = {
+	PATTERN000 : 0,
+	PATTERN001 : 1,
+	PATTERN010 : 2,
+	PATTERN011 : 3,
+	PATTERN100 : 4,
+	PATTERN101 : 5,
+	PATTERN110 : 6,
+	PATTERN111 : 7
+};
+
+};D['QRMath']=function(module,exports,require){var QRMath = {
+
+	glog : function(n) {
+	
+		if (n < 1) {
+			throw new Error("glog(" + n + ")");
+		}
+		
+		return QRMath.LOG_TABLE[n];
+	},
+	
+	gexp : function(n) {
+	
+		while (n < 0) {
+			n += 255;
+		}
+	
+		while (n >= 256) {
+			n -= 255;
+		}
+	
+		return QRMath.EXP_TABLE[n];
+	},
+	
+	EXP_TABLE : new Array(256),
+	
+	LOG_TABLE : new Array(256)
+
+};
+	
+for (var i = 0; i < 8; i++) {
+	QRMath.EXP_TABLE[i] = 1 << i;
+}
+for (var i = 8; i < 256; i++) {
+	QRMath.EXP_TABLE[i] = QRMath.EXP_TABLE[i - 4]
+		^ QRMath.EXP_TABLE[i - 5]
+		^ QRMath.EXP_TABLE[i - 6]
+		^ QRMath.EXP_TABLE[i - 8];
+}
+for (var i = 0; i < 255; i++) {
+	QRMath.LOG_TABLE[QRMath.EXP_TABLE[i] ] = i;
+}
+
+module.exports = QRMath;
+
+};D['QRMode']=function(module,exports,require){module.exports = {
+    MODE_NUMBER :       1 << 0,
+    MODE_ALPHA_NUM :    1 << 1,
+    MODE_8BIT_BYTE :    1 << 2,
+    MODE_KANJI :        1 << 3
+};
+
+};D['QRPolynomial']=function(module,exports,require){var QRMath = require('./QRMath');
+
+function QRPolynomial(num, shift) {
+	if (num.length === undefined) {
+		throw new Error(num.length + "/" + shift);
+	}
+
+	var offset = 0;
+
+	while (offset < num.length && num[offset] === 0) {
+		offset++;
+	}
+
+	this.num = new Array(num.length - offset + shift);
+	for (var i = 0; i < num.length - offset; i++) {
+		this.num[i] = num[i + offset];
+	}
+}
+
+QRPolynomial.prototype = {
+
+	get : function(index) {
+		return this.num[index];
+	},
+	
+	getLength : function() {
+		return this.num.length;
+	},
+	
+	multiply : function(e) {
+	
+		var num = new Array(this.getLength() + e.getLength() - 1);
+	
+		for (var i = 0; i < this.getLength(); i++) {
+			for (var j = 0; j < e.getLength(); j++) {
+				num[i + j] ^= QRMath.gexp(QRMath.glog(this.get(i) ) + QRMath.glog(e.get(j) ) );
+			}
+		}
+	
+		return new QRPolynomial(num, 0);
+	},
+	
+	mod : function(e) {
+	
+		if (this.getLength() - e.getLength() < 0) {
+			return this;
+		}
+	
+		var ratio = QRMath.glog(this.get(0) ) - QRMath.glog(e.get(0) );
+	
+		var num = new Array(this.getLength() );
+		
+		for (var i = 0; i < this.getLength(); i++) {
+			num[i] = this.get(i);
+		}
+		
+		for (var x = 0; x < e.getLength(); x++) {
+			num[x] ^= QRMath.gexp(QRMath.glog(e.get(x) ) + ratio);
+		}
+	
+		// recursive call
+		return new QRPolynomial(num, 0).mod(e);
+	}
+};
+
+module.exports = QRPolynomial;
+
+};D['QRRSBlock']=function(module,exports,require){var QRErrorCorrectLevel = require('./QRErrorCorrectLevel');
+
+function QRRSBlock(totalCount, dataCount) {
+	this.totalCount = totalCount;
+	this.dataCount  = dataCount;
+}
+
+QRRSBlock.RS_BLOCK_TABLE = [
+
+	// L
+	// M
+	// Q
+	// H
+
+	// 1
+	[1, 26, 19],
+	[1, 26, 16],
+	[1, 26, 13],
+	[1, 26, 9],
+	
+	// 2
+	[1, 44, 34],
+	[1, 44, 28],
+	[1, 44, 22],
+	[1, 44, 16],
+
+	// 3
+	[1, 70, 55],
+	[1, 70, 44],
+	[2, 35, 17],
+	[2, 35, 13],
+
+	// 4		
+	[1, 100, 80],
+	[2, 50, 32],
+	[2, 50, 24],
+	[4, 25, 9],
+	
+	// 5
+	[1, 134, 108],
+	[2, 67, 43],
+	[2, 33, 15, 2, 34, 16],
+	[2, 33, 11, 2, 34, 12],
+	
+	// 6
+	[2, 86, 68],
+	[4, 43, 27],
+	[4, 43, 19],
+	[4, 43, 15],
+	
+	// 7		
+	[2, 98, 78],
+	[4, 49, 31],
+	[2, 32, 14, 4, 33, 15],
+	[4, 39, 13, 1, 40, 14],
+	
+	// 8
+	[2, 121, 97],
+	[2, 60, 38, 2, 61, 39],
+	[4, 40, 18, 2, 41, 19],
+	[4, 40, 14, 2, 41, 15],
+	
+	// 9
+	[2, 146, 116],
+	[3, 58, 36, 2, 59, 37],
+	[4, 36, 16, 4, 37, 17],
+	[4, 36, 12, 4, 37, 13],
+	
+	// 10		
+	[2, 86, 68, 2, 87, 69],
+	[4, 69, 43, 1, 70, 44],
+	[6, 43, 19, 2, 44, 20],
+	[6, 43, 15, 2, 44, 16],
+
+	// 11
+	[4, 101, 81],
+	[1, 80, 50, 4, 81, 51],
+	[4, 50, 22, 4, 51, 23],
+	[3, 36, 12, 8, 37, 13],
+
+	// 12
+	[2, 116, 92, 2, 117, 93],
+	[6, 58, 36, 2, 59, 37],
+	[4, 46, 20, 6, 47, 21],
+	[7, 42, 14, 4, 43, 15],
+
+	// 13
+	[4, 133, 107],
+	[8, 59, 37, 1, 60, 38],
+	[8, 44, 20, 4, 45, 21],
+	[12, 33, 11, 4, 34, 12],
+
+	// 14
+	[3, 145, 115, 1, 146, 116],
+	[4, 64, 40, 5, 65, 41],
+	[11, 36, 16, 5, 37, 17],
+	[11, 36, 12, 5, 37, 13],
+
+	// 15
+	[5, 109, 87, 1, 110, 88],
+	[5, 65, 41, 5, 66, 42],
+	[5, 54, 24, 7, 55, 25],
+	[11, 36, 12],
+
+	// 16
+	[5, 122, 98, 1, 123, 99],
+	[7, 73, 45, 3, 74, 46],
+	[15, 43, 19, 2, 44, 20],
+	[3, 45, 15, 13, 46, 16],
+
+	// 17
+	[1, 135, 107, 5, 136, 108],
+	[10, 74, 46, 1, 75, 47],
+	[1, 50, 22, 15, 51, 23],
+	[2, 42, 14, 17, 43, 15],
+
+	// 18
+	[5, 150, 120, 1, 151, 121],
+	[9, 69, 43, 4, 70, 44],
+	[17, 50, 22, 1, 51, 23],
+	[2, 42, 14, 19, 43, 15],
+
+	// 19
+	[3, 141, 113, 4, 142, 114],
+	[3, 70, 44, 11, 71, 45],
+	[17, 47, 21, 4, 48, 22],
+	[9, 39, 13, 16, 40, 14],
+
+	// 20
+	[3, 135, 107, 5, 136, 108],
+	[3, 67, 41, 13, 68, 42],
+	[15, 54, 24, 5, 55, 25],
+	[15, 43, 15, 10, 44, 16],
+
+	// 21
+	[4, 144, 116, 4, 145, 117],
+	[17, 68, 42],
+	[17, 50, 22, 6, 51, 23],
+	[19, 46, 16, 6, 47, 17],
+
+	// 22
+	[2, 139, 111, 7, 140, 112],
+	[17, 74, 46],
+	[7, 54, 24, 16, 55, 25],
+	[34, 37, 13],
+
+	// 23
+	[4, 151, 121, 5, 152, 122],
+	[4, 75, 47, 14, 76, 48],
+	[11, 54, 24, 14, 55, 25],
+	[16, 45, 15, 14, 46, 16],
+
+	// 24
+	[6, 147, 117, 4, 148, 118],
+	[6, 73, 45, 14, 74, 46],
+	[11, 54, 24, 16, 55, 25],
+	[30, 46, 16, 2, 47, 17],
+
+	// 25
+	[8, 132, 106, 4, 133, 107],
+	[8, 75, 47, 13, 76, 48],
+	[7, 54, 24, 22, 55, 25],
+	[22, 45, 15, 13, 46, 16],
+
+	// 26
+	[10, 142, 114, 2, 143, 115],
+	[19, 74, 46, 4, 75, 47],
+	[28, 50, 22, 6, 51, 23],
+	[33, 46, 16, 4, 47, 17],
+
+	// 27
+	[8, 152, 122, 4, 153, 123],
+	[22, 73, 45, 3, 74, 46],
+	[8, 53, 23, 26, 54, 24],
+	[12, 45, 15, 28, 46, 16],
+
+	// 28
+	[3, 147, 117, 10, 148, 118],
+	[3, 73, 45, 23, 74, 46],
+	[4, 54, 24, 31, 55, 25],
+	[11, 45, 15, 31, 46, 16],
+
+	// 29
+	[7, 146, 116, 7, 147, 117],
+	[21, 73, 45, 7, 74, 46],
+	[1, 53, 23, 37, 54, 24],
+	[19, 45, 15, 26, 46, 16],
+
+	// 30
+	[5, 145, 115, 10, 146, 116],
+	[19, 75, 47, 10, 76, 48],
+	[15, 54, 24, 25, 55, 25],
+	[23, 45, 15, 25, 46, 16],
+
+	// 31
+	[13, 145, 115, 3, 146, 116],
+	[2, 74, 46, 29, 75, 47],
+	[42, 54, 24, 1, 55, 25],
+	[23, 45, 15, 28, 46, 16],
+
+	// 32
+	[17, 145, 115],
+	[10, 74, 46, 23, 75, 47],
+	[10, 54, 24, 35, 55, 25],
+	[19, 45, 15, 35, 46, 16],
+
+	// 33
+	[17, 145, 115, 1, 146, 116],
+	[14, 74, 46, 21, 75, 47],
+	[29, 54, 24, 19, 55, 25],
+	[11, 45, 15, 46, 46, 16],
+
+	// 34
+	[13, 145, 115, 6, 146, 116],
+	[14, 74, 46, 23, 75, 47],
+	[44, 54, 24, 7, 55, 25],
+	[59, 46, 16, 1, 47, 17],
+
+	// 35
+	[12, 151, 121, 7, 152, 122],
+	[12, 75, 47, 26, 76, 48],
+	[39, 54, 24, 14, 55, 25],
+	[22, 45, 15, 41, 46, 16],
+
+	// 36
+	[6, 151, 121, 14, 152, 122],
+	[6, 75, 47, 34, 76, 48],
+	[46, 54, 24, 10, 55, 25],
+	[2, 45, 15, 64, 46, 16],
+
+	// 37
+	[17, 152, 122, 4, 153, 123],
+	[29, 74, 46, 14, 75, 47],
+	[49, 54, 24, 10, 55, 25],
+	[24, 45, 15, 46, 46, 16],
+
+	// 38
+	[4, 152, 122, 18, 153, 123],
+	[13, 74, 46, 32, 75, 47],
+	[48, 54, 24, 14, 55, 25],
+	[42, 45, 15, 32, 46, 16],
+
+	// 39
+	[20, 147, 117, 4, 148, 118],
+	[40, 75, 47, 7, 76, 48],
+	[43, 54, 24, 22, 55, 25],
+	[10, 45, 15, 67, 46, 16],
+
+	// 40
+	[19, 148, 118, 6, 149, 119],
+	[18, 75, 47, 31, 76, 48],
+	[34, 54, 24, 34, 55, 25],
+	[20, 45, 15, 61, 46, 16]
+];
+
+QRRSBlock.getRSBlocks = function(typeNumber, errorCorrectLevel) {
+	
+	var rsBlock = QRRSBlock.getRsBlockTable(typeNumber, errorCorrectLevel);
+	
+	if (rsBlock === undefined) {
+		throw new Error("bad rs block @ typeNumber:" + typeNumber + "/errorCorrectLevel:" + errorCorrectLevel);
+	}
+
+	var length = rsBlock.length / 3;
+	
+	var list = [];
+	
+	for (var i = 0; i < length; i++) {
+
+		var count = rsBlock[i * 3 + 0];
+		var totalCount = rsBlock[i * 3 + 1];
+		var dataCount  = rsBlock[i * 3 + 2];
+
+		for (var j = 0; j < count; j++) {
+			list.push(new QRRSBlock(totalCount, dataCount) );	
+		}
+	}
+	
+	return list;
+};
+
+QRRSBlock.getRsBlockTable = function(typeNumber, errorCorrectLevel) {
+
+	switch(errorCorrectLevel) {
+	case QRErrorCorrectLevel.L :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 0];
+	case QRErrorCorrectLevel.M :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 1];
+	case QRErrorCorrectLevel.Q :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 2];
+	case QRErrorCorrectLevel.H :
+		return QRRSBlock.RS_BLOCK_TABLE[(typeNumber - 1) * 4 + 3];
+	default :
+		return undefined;
+	}
+};
+
+module.exports = QRRSBlock;
+
+};D['QRUtil']=function(module,exports,require){var QRMode = require('./QRMode');
+var QRPolynomial = require('./QRPolynomial');
+var QRMath = require('./QRMath');
+var QRMaskPattern = require('./QRMaskPattern');
+
+var QRUtil = {
+
+    PATTERN_POSITION_TABLE : [
+        [],
+        [6, 18],
+        [6, 22],
+        [6, 26],
+        [6, 30],
+        [6, 34],
+        [6, 22, 38],
+        [6, 24, 42],
+        [6, 26, 46],
+        [6, 28, 50],
+        [6, 30, 54],        
+        [6, 32, 58],
+        [6, 34, 62],
+        [6, 26, 46, 66],
+        [6, 26, 48, 70],
+        [6, 26, 50, 74],
+        [6, 30, 54, 78],
+        [6, 30, 56, 82],
+        [6, 30, 58, 86],
+        [6, 34, 62, 90],
+        [6, 28, 50, 72, 94],
+        [6, 26, 50, 74, 98],
+        [6, 30, 54, 78, 102],
+        [6, 28, 54, 80, 106],
+        [6, 32, 58, 84, 110],
+        [6, 30, 58, 86, 114],
+        [6, 34, 62, 90, 118],
+        [6, 26, 50, 74, 98, 122],
+        [6, 30, 54, 78, 102, 126],
+        [6, 26, 52, 78, 104, 130],
+        [6, 30, 56, 82, 108, 134],
+        [6, 34, 60, 86, 112, 138],
+        [6, 30, 58, 86, 114, 142],
+        [6, 34, 62, 90, 118, 146],
+        [6, 30, 54, 78, 102, 126, 150],
+        [6, 24, 50, 76, 102, 128, 154],
+        [6, 28, 54, 80, 106, 132, 158],
+        [6, 32, 58, 84, 110, 136, 162],
+        [6, 26, 54, 82, 110, 138, 166],
+        [6, 30, 58, 86, 114, 142, 170]
+    ],
+
+    G15 : (1 << 10) | (1 << 8) | (1 << 5) | (1 << 4) | (1 << 2) | (1 << 1) | (1 << 0),
+    G18 : (1 << 12) | (1 << 11) | (1 << 10) | (1 << 9) | (1 << 8) | (1 << 5) | (1 << 2) | (1 << 0),
+    G15_MASK : (1 << 14) | (1 << 12) | (1 << 10)    | (1 << 4) | (1 << 1),
+
+    getBCHTypeInfo : function(data) {
+        var d = data << 10;
+        while (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G15) >= 0) {
+            d ^= (QRUtil.G15 << (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G15) ) );    
+        }
+        return ( (data << 10) | d) ^ QRUtil.G15_MASK;
+    },
+
+    getBCHTypeNumber : function(data) {
+        var d = data << 12;
+        while (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G18) >= 0) {
+            d ^= (QRUtil.G18 << (QRUtil.getBCHDigit(d) - QRUtil.getBCHDigit(QRUtil.G18) ) );    
+        }
+        return (data << 12) | d;
+    },
+
+    getBCHDigit : function(data) {
+
+        var digit = 0;
+
+        while (data !== 0) {
+            digit++;
+            data >>>= 1;
+        }
+
+        return digit;
+    },
+
+    getPatternPosition : function(typeNumber) {
+        return QRUtil.PATTERN_POSITION_TABLE[typeNumber - 1];
+    },
+
+    getMask : function(maskPattern, i, j) {
+        
+        switch (maskPattern) {
+            
+        case QRMaskPattern.PATTERN000 : return (i + j) % 2 === 0;
+        case QRMaskPattern.PATTERN001 : return i % 2 === 0;
+        case QRMaskPattern.PATTERN010 : return j % 3 === 0;
+        case QRMaskPattern.PATTERN011 : return (i + j) % 3 === 0;
+        case QRMaskPattern.PATTERN100 : return (Math.floor(i / 2) + Math.floor(j / 3) ) % 2 === 0;
+        case QRMaskPattern.PATTERN101 : return (i * j) % 2 + (i * j) % 3 === 0;
+        case QRMaskPattern.PATTERN110 : return ( (i * j) % 2 + (i * j) % 3) % 2 === 0;
+        case QRMaskPattern.PATTERN111 : return ( (i * j) % 3 + (i + j) % 2) % 2 === 0;
+
+        default :
+            throw new Error("bad maskPattern:" + maskPattern);
+        }
+    },
+
+    getErrorCorrectPolynomial : function(errorCorrectLength) {
+
+        var a = new QRPolynomial([1], 0);
+
+        for (var i = 0; i < errorCorrectLength; i++) {
+            a = a.multiply(new QRPolynomial([1, QRMath.gexp(i)], 0) );
+        }
+
+        return a;
+    },
+
+    getLengthInBits : function(mode, type) {
+
+        if (1 <= type && type < 10) {
+
+            // 1 - 9
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 10;
+            case QRMode.MODE_ALPHA_NUM  : return 9;
+            case QRMode.MODE_8BIT_BYTE  : return 8;
+            case QRMode.MODE_KANJI      : return 8;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else if (type < 27) {
+
+            // 10 - 26
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 12;
+            case QRMode.MODE_ALPHA_NUM  : return 11;
+            case QRMode.MODE_8BIT_BYTE  : return 16;
+            case QRMode.MODE_KANJI      : return 10;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else if (type < 41) {
+
+            // 27 - 40
+
+            switch(mode) {
+            case QRMode.MODE_NUMBER     : return 14;
+            case QRMode.MODE_ALPHA_NUM  : return 13;
+            case QRMode.MODE_8BIT_BYTE  : return 16;
+            case QRMode.MODE_KANJI      : return 12;
+            default :
+                throw new Error("mode:" + mode);
+            }
+
+        } else {
+            throw new Error("type:" + type);
+        }
+    },
+
+    getLostPoint : function(qrCode) {
+        
+        var moduleCount = qrCode.getModuleCount();
+        var lostPoint = 0;
+        var row = 0; 
+        var col = 0;
+
+        
+        // LEVEL1
+        
+        for (row = 0; row < moduleCount; row++) {
+
+            for (col = 0; col < moduleCount; col++) {
+
+                var sameCount = 0;
+                var dark = qrCode.isDark(row, col);
+
+                for (var r = -1; r <= 1; r++) {
+
+                    if (row + r < 0 || moduleCount <= row + r) {
+                        continue;
+                    }
+
+                    for (var c = -1; c <= 1; c++) {
+
+                        if (col + c < 0 || moduleCount <= col + c) {
+                            continue;
+                        }
+
+                        if (r === 0 && c === 0) {
+                            continue;
+                        }
+
+                        if (dark === qrCode.isDark(row + r, col + c) ) {
+                            sameCount++;
+                        }
+                    }
+                }
+
+                if (sameCount > 5) {
+                    lostPoint += (3 + sameCount - 5);
+                }
+            }
+        }
+
+        // LEVEL2
+
+        for (row = 0; row < moduleCount - 1; row++) {
+            for (col = 0; col < moduleCount - 1; col++) {
+                var count = 0;
+                if (qrCode.isDark(row,     col    ) ) count++;
+                if (qrCode.isDark(row + 1, col    ) ) count++;
+                if (qrCode.isDark(row,     col + 1) ) count++;
+                if (qrCode.isDark(row + 1, col + 1) ) count++;
+                if (count === 0 || count === 4) {
+                    lostPoint += 3;
+                }
+            }
+        }
+
+        // LEVEL3
+
+        for (row = 0; row < moduleCount; row++) {
+            for (col = 0; col < moduleCount - 6; col++) {
+                if (qrCode.isDark(row, col) && 
+                        !qrCode.isDark(row, col + 1) && 
+                         qrCode.isDark(row, col + 2) && 
+                         qrCode.isDark(row, col + 3) && 
+                         qrCode.isDark(row, col + 4) && 
+                        !qrCode.isDark(row, col + 5) && 
+                         qrCode.isDark(row, col + 6) ) {
+                    lostPoint += 40;
+                }
+            }
+        }
+
+        for (col = 0; col < moduleCount; col++) {
+            for (row = 0; row < moduleCount - 6; row++) {
+                if (qrCode.isDark(row, col) &&
+                        !qrCode.isDark(row + 1, col) &&
+                         qrCode.isDark(row + 2, col) &&
+                         qrCode.isDark(row + 3, col) &&
+                         qrCode.isDark(row + 4, col) &&
+                        !qrCode.isDark(row + 5, col) &&
+                         qrCode.isDark(row + 6, col) ) {
+                    lostPoint += 40;
+                }
+            }
+        }
+
+        // LEVEL4
+        
+        var darkCount = 0;
+
+        for (col = 0; col < moduleCount; col++) {
+            for (row = 0; row < moduleCount; row++) {
+                if (qrCode.isDark(row, col) ) {
+                    darkCount++;
+                }
+            }
+        }
+        
+        var ratio = Math.abs(100 * darkCount / moduleCount / moduleCount - 50) / 5;
+        lostPoint += ratio * 10;
+
+        return lostPoint;       
+    }
+
+};
+
+module.exports = QRUtil;
+
+};D['index']=function(module,exports,require){//---------------------------------------------------------------------
+// QRCode for JavaScript
+//
+// Copyright (c) 2009 Kazuhiko Arase
+//
+// URL: http://www.d-project.com/
+//
+// Licensed under the MIT license:
+//   http://www.opensource.org/licenses/mit-license.php
+//
+// The word "QR Code" is registered trademark of 
+// DENSO WAVE INCORPORATED
+//   http://www.denso-wave.com/qrcode/faqpatent-e.html
+//
+//---------------------------------------------------------------------
+// Modified to work in node for this project (and some refactoring)
+//---------------------------------------------------------------------
+
+var QR8bitByte = require('./QR8bitByte');
+var QRUtil = require('./QRUtil');
+var QRPolynomial = require('./QRPolynomial');
+var QRRSBlock = require('./QRRSBlock');
+var QRBitBuffer = require('./QRBitBuffer');
+
+function QRCode(typeNumber, errorCorrectLevel) {
+	this.typeNumber = typeNumber;
+	this.errorCorrectLevel = errorCorrectLevel;
+	this.modules = null;
+	this.moduleCount = 0;
+	this.dataCache = null;
+	this.dataList = [];
+}
+
+QRCode.prototype = {
+	
+	addData : function(data) {
+		var newData = new QR8bitByte(data);
+		this.dataList.push(newData);
+		this.dataCache = null;
+	},
+	
+	isDark : function(row, col) {
+		if (row < 0 || this.moduleCount <= row || col < 0 || this.moduleCount <= col) {
+			throw new Error(row + "," + col);
+		}
+		return this.modules[row][col];
+	},
+
+	getModuleCount : function() {
+		return this.moduleCount;
+	},
+	
+	make : function() {
+		// Calculate automatically typeNumber if provided is < 1
+		if (this.typeNumber < 1 ){
+			var typeNumber = 1;
+			for (typeNumber = 1; typeNumber < 40; typeNumber++) {
+				var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, this.errorCorrectLevel);
+
+				var buffer = new QRBitBuffer();
+				var totalDataCount = 0;
+				for (var i = 0; i < rsBlocks.length; i++) {
+					totalDataCount += rsBlocks[i].dataCount;
+				}
+
+				for (var x = 0; x < this.dataList.length; x++) {
+					var data = this.dataList[x];
+					buffer.put(data.mode, 4);
+					buffer.put(data.getLength(), QRUtil.getLengthInBits(data.mode, typeNumber) );
+					data.write(buffer);
+				}
+				if (buffer.getLengthInBits() <= totalDataCount * 8)
+					break;
+			}
+			this.typeNumber = typeNumber;
+		}
+		this.makeImpl(false, this.getBestMaskPattern() );
+	},
+	
+	makeImpl : function(test, maskPattern) {
+		
+		this.moduleCount = this.typeNumber * 4 + 17;
+		this.modules = new Array(this.moduleCount);
+		
+		for (var row = 0; row < this.moduleCount; row++) {
+			
+			this.modules[row] = new Array(this.moduleCount);
+			
+			for (var col = 0; col < this.moduleCount; col++) {
+				this.modules[row][col] = null;//(col + row) % 3;
+			}
+		}
+	
+		this.setupPositionProbePattern(0, 0);
+		this.setupPositionProbePattern(this.moduleCount - 7, 0);
+		this.setupPositionProbePattern(0, this.moduleCount - 7);
+		this.setupPositionAdjustPattern();
+		this.setupTimingPattern();
+		this.setupTypeInfo(test, maskPattern);
+		
+		if (this.typeNumber >= 7) {
+			this.setupTypeNumber(test);
+		}
+	
+		if (this.dataCache === null) {
+			this.dataCache = QRCode.createData(this.typeNumber, this.errorCorrectLevel, this.dataList);
+		}
+	
+		this.mapData(this.dataCache, maskPattern);
+	},
+
+	setupPositionProbePattern : function(row, col)  {
+		
+		for (var r = -1; r <= 7; r++) {
+			
+			if (row + r <= -1 || this.moduleCount <= row + r) continue;
+			
+			for (var c = -1; c <= 7; c++) {
+				
+				if (col + c <= -1 || this.moduleCount <= col + c) continue;
+				
+				if ( (0 <= r && r <= 6 && (c === 0 || c === 6) ) || 
+                     (0 <= c && c <= 6 && (r === 0 || r === 6) ) || 
+                     (2 <= r && r <= 4 && 2 <= c && c <= 4) ) {
+					this.modules[row + r][col + c] = true;
+				} else {
+					this.modules[row + r][col + c] = false;
+				}
+			}		
+		}		
+	},
+	
+	getBestMaskPattern : function() {
+	
+		var minLostPoint = 0;
+		var pattern = 0;
+	
+		for (var i = 0; i < 8; i++) {
+			
+			this.makeImpl(true, i);
+	
+			var lostPoint = QRUtil.getLostPoint(this);
+	
+			if (i === 0 || minLostPoint >  lostPoint) {
+				minLostPoint = lostPoint;
+				pattern = i;
+			}
+		}
+	
+		return pattern;
+	},
+	
+	createMovieClip : function(target_mc, instance_name, depth) {
+	
+		var qr_mc = target_mc.createEmptyMovieClip(instance_name, depth);
+		var cs = 1;
+	
+		this.make();
+
+		for (var row = 0; row < this.modules.length; row++) {
+			
+			var y = row * cs;
+			
+			for (var col = 0; col < this.modules[row].length; col++) {
+	
+				var x = col * cs;
+				var dark = this.modules[row][col];
+			
+				if (dark) {
+					qr_mc.beginFill(0, 100);
+					qr_mc.moveTo(x, y);
+					qr_mc.lineTo(x + cs, y);
+					qr_mc.lineTo(x + cs, y + cs);
+					qr_mc.lineTo(x, y + cs);
+					qr_mc.endFill();
+				}
+			}
+		}
+		
+		return qr_mc;
+	},
+
+	setupTimingPattern : function() {
+		
+		for (var r = 8; r < this.moduleCount - 8; r++) {
+			if (this.modules[r][6] !== null) {
+				continue;
+			}
+			this.modules[r][6] = (r % 2 === 0);
+		}
+	
+		for (var c = 8; c < this.moduleCount - 8; c++) {
+			if (this.modules[6][c] !== null) {
+				continue;
+			}
+			this.modules[6][c] = (c % 2 === 0);
+		}
+	},
+	
+	setupPositionAdjustPattern : function() {
+	
+		var pos = QRUtil.getPatternPosition(this.typeNumber);
+		
+		for (var i = 0; i < pos.length; i++) {
+		
+			for (var j = 0; j < pos.length; j++) {
+			
+				var row = pos[i];
+				var col = pos[j];
+				
+				if (this.modules[row][col] !== null) {
+					continue;
+				}
+				
+				for (var r = -2; r <= 2; r++) {
+				
+					for (var c = -2; c <= 2; c++) {
+					
+						if (Math.abs(r) === 2 || 
+                            Math.abs(c) === 2 ||
+                            (r === 0 && c === 0) ) {
+							this.modules[row + r][col + c] = true;
+						} else {
+							this.modules[row + r][col + c] = false;
+						}
+					}
+				}
+			}
+		}
+	},
+	
+	setupTypeNumber : function(test) {
+	
+		var bits = QRUtil.getBCHTypeNumber(this.typeNumber);
+        var mod;
+	
+		for (var i = 0; i < 18; i++) {
+			mod = (!test && ( (bits >> i) & 1) === 1);
+			this.modules[Math.floor(i / 3)][i % 3 + this.moduleCount - 8 - 3] = mod;
+		}
+	
+		for (var x = 0; x < 18; x++) {
+			mod = (!test && ( (bits >> x) & 1) === 1);
+			this.modules[x % 3 + this.moduleCount - 8 - 3][Math.floor(x / 3)] = mod;
+		}
+	},
+	
+	setupTypeInfo : function(test, maskPattern) {
+	
+		var data = (this.errorCorrectLevel << 3) | maskPattern;
+		var bits = QRUtil.getBCHTypeInfo(data);
+        var mod;
+	
+		// vertical		
+		for (var v = 0; v < 15; v++) {
+	
+			mod = (!test && ( (bits >> v) & 1) === 1);
+	
+			if (v < 6) {
+				this.modules[v][8] = mod;
+			} else if (v < 8) {
+				this.modules[v + 1][8] = mod;
+			} else {
+				this.modules[this.moduleCount - 15 + v][8] = mod;
+			}
+		}
+	
+		// horizontal
+		for (var h = 0; h < 15; h++) {
+	
+			mod = (!test && ( (bits >> h) & 1) === 1);
+			
+			if (h < 8) {
+				this.modules[8][this.moduleCount - h - 1] = mod;
+			} else if (h < 9) {
+				this.modules[8][15 - h - 1 + 1] = mod;
+			} else {
+				this.modules[8][15 - h - 1] = mod;
+			}
+		}
+	
+		// fixed module
+		this.modules[this.moduleCount - 8][8] = (!test);
+	
+	},
+	
+	mapData : function(data, maskPattern) {
+		
+		var inc = -1;
+		var row = this.moduleCount - 1;
+		var bitIndex = 7;
+		var byteIndex = 0;
+		
+		for (var col = this.moduleCount - 1; col > 0; col -= 2) {
+	
+			if (col === 6) col--;
+	
+			while (true) {
+	
+				for (var c = 0; c < 2; c++) {
+					
+					if (this.modules[row][col - c] === null) {
+						
+						var dark = false;
+	
+						if (byteIndex < data.length) {
+							dark = ( ( (data[byteIndex] >>> bitIndex) & 1) === 1);
+						}
+	
+						var mask = QRUtil.getMask(maskPattern, row, col - c);
+	
+						if (mask) {
+							dark = !dark;
+						}
+						
+						this.modules[row][col - c] = dark;
+						bitIndex--;
+	
+						if (bitIndex === -1) {
+							byteIndex++;
+							bitIndex = 7;
+						}
+					}
+				}
+								
+				row += inc;
+	
+				if (row < 0 || this.moduleCount <= row) {
+					row -= inc;
+					inc = -inc;
+					break;
+				}
+			}
+		}
+		
+	}
+
+};
+
+QRCode.PAD0 = 0xEC;
+QRCode.PAD1 = 0x11;
+
+QRCode.createData = function(typeNumber, errorCorrectLevel, dataList) {
+	
+	var rsBlocks = QRRSBlock.getRSBlocks(typeNumber, errorCorrectLevel);
+	
+	var buffer = new QRBitBuffer();
+	
+	for (var i = 0; i < dataList.length; i++) {
+		var data = dataList[i];
+		buffer.put(data.mode, 4);
+		buffer.put(data.getLength(), QRUtil.getLengthInBits(data.mode, typeNumber) );
+		data.write(buffer);
+	}
+
+	// calc num max data.
+	var totalDataCount = 0;
+	for (var x = 0; x < rsBlocks.length; x++) {
+		totalDataCount += rsBlocks[x].dataCount;
+	}
+
+	if (buffer.getLengthInBits() > totalDataCount * 8) {
+		throw new Error("code length overflow. (" + 
+            buffer.getLengthInBits() + 
+            ">" +  
+            totalDataCount * 8 + 
+            ")");
+	}
+
+	// end code
+	if (buffer.getLengthInBits() + 4 <= totalDataCount * 8) {
+		buffer.put(0, 4);
+	}
+
+	// padding
+	while (buffer.getLengthInBits() % 8 !== 0) {
+		buffer.putBit(false);
+	}
+
+	// padding
+	while (true) {
+		
+		if (buffer.getLengthInBits() >= totalDataCount * 8) {
+			break;
+		}
+		buffer.put(QRCode.PAD0, 8);
+		
+		if (buffer.getLengthInBits() >= totalDataCount * 8) {
+			break;
+		}
+		buffer.put(QRCode.PAD1, 8);
+	}
+
+	return QRCode.createBytes(buffer, rsBlocks);
+};
+
+QRCode.createBytes = function(buffer, rsBlocks) {
+
+	var offset = 0;
+	
+	var maxDcCount = 0;
+	var maxEcCount = 0;
+	
+	var dcdata = new Array(rsBlocks.length);
+	var ecdata = new Array(rsBlocks.length);
+	
+	for (var r = 0; r < rsBlocks.length; r++) {
+
+		var dcCount = rsBlocks[r].dataCount;
+		var ecCount = rsBlocks[r].totalCount - dcCount;
+
+		maxDcCount = Math.max(maxDcCount, dcCount);
+		maxEcCount = Math.max(maxEcCount, ecCount);
+		
+		dcdata[r] = new Array(dcCount);
+		
+		for (var i = 0; i < dcdata[r].length; i++) {
+			dcdata[r][i] = 0xff & buffer.buffer[i + offset];
+		}
+		offset += dcCount;
+		
+		var rsPoly = QRUtil.getErrorCorrectPolynomial(ecCount);
+		var rawPoly = new QRPolynomial(dcdata[r], rsPoly.getLength() - 1);
+
+		var modPoly = rawPoly.mod(rsPoly);
+		ecdata[r] = new Array(rsPoly.getLength() - 1);
+		for (var x = 0; x < ecdata[r].length; x++) {
+            var modIndex = x + modPoly.getLength() - ecdata[r].length;
+			ecdata[r][x] = (modIndex >= 0)? modPoly.get(modIndex) : 0;
+		}
+
+	}
+	
+	var totalCodeCount = 0;
+	for (var y = 0; y < rsBlocks.length; y++) {
+		totalCodeCount += rsBlocks[y].totalCount;
+	}
+
+	var data = new Array(totalCodeCount);
+	var index = 0;
+
+	for (var z = 0; z < maxDcCount; z++) {
+		for (var s = 0; s < rsBlocks.length; s++) {
+			if (z < dcdata[s].length) {
+				data[index++] = dcdata[s][z];
+			}
+		}
+	}
+
+	for (var xx = 0; xx < maxEcCount; xx++) {
+		for (var t = 0; t < rsBlocks.length; t++) {
+			if (xx < ecdata[t].length) {
+				data[index++] = ecdata[t][xx];
+			}
+		}
+	}
+
+	return data;
+
+};
+
+module.exports = QRCode;
+
+};var C={};function rq(n){n=n.replace('./','').replace(/\.js$/,'');if(!C[n]){var m={exports:{}};C[n]=m;D[n](m,m.exports,rq)}return C[n].exports}
+var QC=rq('index'),EL=rq('QRErrorCorrectLevel');
+window.QRCode=function(el,o){var q=new QC(-1,EL.M);q.addData(o.text);q.make();var n=q.getModuleCount(),z=2,t=n+z*2,s=Math.max(2,Math.floor((o.width||96)/t)),c=document.createElement('canvas');c.width=c.height=t*s;c.setAttribute('role','img');c.setAttribute('aria-label','Código QR '+o.text);var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);x.fillStyle='#000';for(var r=0;r<n;r++)for(var k=0;k<n;k++)if(q.isDark(r,k))x.fillRect((k+z)*s,(r+z)*s,s,s);c.style.width=c.style.height=(o.width||96)+'px';el.innerHTML='';el.appendChild(c)}})();</script>
+<style>:root{--e1:#170e09;--e2:#2a1a11;--e:#2a1a11;--m:#6b4429;--c:#b87b45;--g:#d9a85f;--cr:#f3e9d9;--ln:#4f3523;--l:#4f3523;--p:#33201466;--w:#33201499;--ink:#e9d6b8;--t:#e9d6b8;--mu:#b9a285;--ok:#8fae62;--no:#c2553a;--r:#c2553a;--y:#d9a85f;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:inherit}html{scroll-behavior:smooth}
+body{margin:0;display:flex;min-height:100vh;background:radial-gradient(120% 80% at 80% 0,#3a2314,var(--e1) 60%) fixed;color:var(--ink);font:14px/1.55 Manrope,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif}
+h1,h2,h3,h4{font-family:'Cormorant Garamond',Georgia,serif;margin:0;font-weight:700;color:#f6ead6}h2{font-size:28px}h3{font-size:19px;margin-bottom:8px}h4{font-size:17px;margin-bottom:6px}
+svg.i{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:-3px}
+nav{width:250px;flex:none;position:sticky;top:0;height:100vh;overflow:auto;padding:16px 10px;background:#120a06f5;border-right:1px solid var(--ln);transition:left .25s;z-index:30}
+.lg{font:700 26px 'Cormorant Garamond',serif;color:var(--g);padding:0 10px 14px}.lg small{display:block;font:500 11px Manrope;color:var(--mu)}
+nav button.m{display:flex;gap:10px;align-items:center;width:100%;background:none;border:0;color:var(--ink);padding:10px 12px;border-radius:12px;font:700 11.5px Manrope;letter-spacing:.03em;cursor:pointer;text-align:left;transition:.2s}nav button.m:hover{background:#2a1a11}nav button.m.on{background:linear-gradient(135deg,var(--g),var(--c));color:#26150b}.sub{display:none}
+main{flex:1;min-width:0}header{position:sticky;top:0;z-index:20;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 22px;background:#170e09dd;backdrop-filter:blur(10px);border-bottom:1px solid var(--ln)}.sp{flex:1}.clk{font-size:12px;color:var(--mu)}
+#v{padding:20px 22px 70px;max-width:1500px;animation:in .35s}@keyframes in{from{opacity:.3;transform:translateY(6px)}}
+.tabs,.chain{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}.tabs a,.chain a{padding:7px 15px;border-radius:30px;border:1px solid var(--ln);cursor:pointer;font-size:13px;transition:.2s;font-weight:600}.tabs a:hover,.chain a:hover{border-color:var(--g)}.tabs a.on,.chain a.on{background:var(--g);color:#26150b;border-color:var(--g)}
+.sim,.sg{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:#f6e2b8;color:#6b4a0a}.sg{background:none;border:1px solid var(--g);color:var(--g);padding:4px 14px;font-size:12px;margin-bottom:16px}
+.ban{background:#f6e2b8;color:#5e410a;border-radius:12px;padding:9px 14px;margin-bottom:16px;font-size:12.5px}
+.card,.cd{background:var(--w);border:1px solid var(--ln);border-radius:16px;padding:16px;min-width:0;margin-bottom:16px;box-shadow:0 14px 34px -22px #000}.g2>.card,.g2>.cd,.grid>.cd,.g3>.cd,.ig>.card{margin:0}.cd small,small{color:var(--mu)}
+.g2{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));margin-bottom:16px}.grid{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr))}.g3{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.ig{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin-bottom:14px}.ig .card{border-top:3px solid var(--ok)}
+.kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}.k{background:var(--w);border:1px solid var(--ln);border-left:4px solid var(--g);border-radius:14px;padding:12px 14px}.k b{display:block;font:700 30px/1.1 'Cormorant Garamond',serif;color:var(--g)}.k span{font-size:12px;color:var(--mu)}
+canvas{display:block;width:100%}.bisec{margin-bottom:30px}.bisec>h2{font-size:clamp(28px,3.6vw,44px)}.lead{max-width:760px;color:var(--mu);margin:6px 0 20px}
+.tw{overflow:auto;max-height:480px;border-radius:12px;border:1px solid var(--ln)}table{border-collapse:collapse;width:100%;font-size:12.5px}th{background:var(--m);color:#fff;text-align:left;padding:9px;position:sticky;top:0;white-space:nowrap;cursor:pointer}td{padding:7px 9px;border-bottom:1px solid var(--ln);white-space:nowrap}tr:hover td{background:#4a2c1866}
+input,select,textarea{font:inherit;padding:8px 11px;border:1px solid var(--ln);border-radius:10px;background:#1d120b;color:var(--ink);max-width:100%}.fi{margin-bottom:8px;width:240px}
+form,.fr{display:flex;flex-wrap:wrap;gap:10px;align-items:end;margin-bottom:12px}label{font-size:11.5px;display:grid;gap:3px;color:var(--mu)}
+.bt{display:inline-flex;gap:6px;align-items:center;background:linear-gradient(135deg,var(--g),var(--c));color:#26150b;border:0;border-radius:30px;padding:10px 20px;font:700 13px Manrope;cursor:pointer;text-decoration:none;transition:.2s;margin:0 4px 4px 0}.bt:hover{transform:translateY(-2px);box-shadow:0 8px 22px #d9a85f55}.bt.o,.bt.s{background:none;border:1px solid var(--g);color:var(--g)}.bt.ok{background:var(--ok);color:#13200a}.bt.d{background:var(--no);color:#fff}.bt.x{padding:5px 12px;font-size:12px}
+.bd{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11.5px;font-weight:700;background:#4a3222;color:#e9d6b8}.bd.g,.b2{background:#dcead6;color:#2f5a2b}.bd.y,.b1{background:#f6e6b9;color:#6b4a0a}.bd.r,.b0{background:#f3d7cf;color:#8a2f1d}.tg{cursor:pointer;border:0;border-radius:20px;padding:3px 12px;font:700 12px Manrope}.er{color:var(--no);font-weight:700}
+.pb{height:9px;background:#4a3222;border-radius:9px;overflow:hidden}.pb i{display:block;height:100%;background:var(--ok)}.pl{width:10px;height:10px;border-radius:50%;background:var(--ok);display:inline-block;margin-right:6px;animation:pu 1.6s infinite}@keyframes pu{50%{opacity:.25;transform:scale(1.5)}}
+.pe{display:flex;gap:14px;align-items:center}.av{width:62px;height:62px;border-radius:50%;background:linear-gradient(135deg,var(--g),var(--m));display:grid;place-items:center;font:700 24px 'Cormorant Garamond',serif;color:#fff;flex:none}
+.ix{border-top:5px solid var(--c)}.ix.v1{border-top-color:var(--g)}.ix header{display:flex;gap:12px;align-items:flex-start;margin-bottom:10px;position:static;padding:0;background:none;border:0;backdrop-filter:none}.ix header i{font:700 38px 'Cormorant Garamond',serif;color:var(--c);line-height:1;font-style:normal}
+.fl{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:6px 18px;font-size:12.5px;margin:10px 0}.fl div span{display:block;color:var(--mu);font-size:11px}.cg{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}pre{white-space:pre-wrap;font:13px/1.6 Manrope}
+.fun{margin:5px auto;padding:10px;border-radius:10px;color:#fff;text-align:center;font-weight:700;animation:fw 1s both}@keyframes fw{from{width:0!important;opacity:0}}
+.tl{border-left:3px solid var(--c);margin-left:8px;padding-left:14px}.tl div{margin-bottom:10px;position:relative}.tl div:before{content:'';position:absolute;left:-22px;top:3px;width:11px;height:11px;border-radius:50%;background:#6b4429}.tl .dn:before{background:var(--ok);box-shadow:0 0 10px var(--ok)}
+.lab{border:2px solid #000;display:inline-flex;gap:10px;padding:10px;background:#fff;color:#000;align-items:center;font-size:12px;margin:8px 0}
+.hero{position:relative;border-radius:20px;overflow:hidden;min-height:400px;background:radial-gradient(ellipse at 70% 30%,#4a2c18,var(--e1) 65%);padding:44px 5vw;margin-bottom:18px;display:grid;align-content:center;border:1px solid var(--ln)}.hero canvas{position:absolute;inset:0;width:100%;height:100%}.hero>div{position:relative;max-width:880px}
+.hero h1,#wl h1{font-size:clamp(34px,5.4vw,72px);line-height:1.03;letter-spacing:-.01em}.hero p,#wl p{max-width:640px;color:#d8c3a2;font-size:16px}.st{display:flex;flex-wrap:wrap;gap:34px;margin:26px 0}.st b{display:block;font:700 46px 'Cormorant Garamond',serif;color:var(--g);line-height:1}.st span{font-size:12px;color:var(--mu)}
+#wl{position:fixed;inset:0;z-index:50;background:radial-gradient(ellipse at 70% 30%,#4a2c18,var(--e1) 65%);display:grid;align-content:center;padding:6vw;overflow:auto}#wl canvas{position:absolute;inset:0;width:100%;height:100%}#wl .in{position:relative;max-width:900px}
+#tt{position:fixed;bottom:18px;right:18px;background:#f6e2b8;color:#3b2415;padding:10px 16px;border-radius:12px;display:none;z-index:60;max-width:360px;font-weight:700}#mb{display:none}
+@media(max-width:860px){nav{position:fixed;left:-270px}nav.o{left:0}#mb{display:inline-flex}#v{padding:12px}.g2{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}@media print{nav,header,.ban,.fi,.bt,form,.tabs,#wl{display:none!important}body{display:block;background:#fff;color:#000}.lab{visibility:visible}}
+#mo{position:fixed;inset:0;background:#000b;display:none;z-index:80;place-items:center;padding:18px;backdrop-filter:blur(5px)}#mo.on{display:grid}#mo .mc{background:#25160e;border:1px solid var(--g);border-radius:18px;padding:20px;max-width:1000px;width:100%;max-height:92vh;overflow:auto;animation:in .25s}#mo h3{margin:8px 0 12px}
+tbody tr{cursor:pointer}#v canvas{cursor:zoom-in}.cd,.card,.k{transition:.25s}.cd:hover,.card:hover,.k:hover{border-color:var(--g);transform:translateY(-2px)}.k b{transition:.3s}
+/* v6: más café, enfoque, visuales */
+body{background:radial-gradient(110% 70% at 85% 0,#4a2c18,#2a1a11 45%,#170e09 80%) fixed}
+nav{width:262px;background:linear-gradient(180deg,#2e1c11f7,#120a06f7);border-right-color:#6b4429}nav button.m{font-size:13px;padding:11px 12px}nav button.m:hover{background:#4a2c18}
+header{background:linear-gradient(90deg,#2e1c11ee,#170e09ee);border-bottom-color:#6b4429}
+.card,.cd{background:linear-gradient(155deg,#4d3120d9,#2c1b11eb);border-color:#6b4429;box-shadow:0 16px 34px -20px #000,inset 0 1px 0 #d9a85f22}
+.k{background:linear-gradient(135deg,#4d3120,#2c1b11);border-color:#6b4429;border-left-color:#d9a85f}
+th{background:linear-gradient(180deg,#8a5a35,#6b4429)}tr:hover td{background:#6b442955}
+.tabs a,.chain a{background:#2c1b1188;border-color:#6b4429}.tabs a.on,.chain a.on{background:linear-gradient(135deg,#d9a85f,#b87b45)}
+input,select,textarea{background:#2a1a11;border-color:#6b4429}
+.hero{background:radial-gradient(ellipse at 70% 30%,#7a4b27,#3a2314 55%,#170e09)}
+:focus-visible{outline:2px solid #f3d28a;outline-offset:2px;border-radius:6px}
+.skip{position:absolute;left:-999px;top:0;background:#d9a85f;color:#26150b;padding:8px 14px;z-index:99;font-weight:700}.skip:focus{left:8px;top:8px}
+#hm{display:contents}#hmb{display:none}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:#6b4429;border-radius:8px}::-webkit-scrollbar-track{background:#1d120b}
+.vz{margin-bottom:16px}.vzr .vsun{animation:vsp 5s ease-in-out infinite;transform-origin:720px 120px}.vzr .vcl{animation:vcl 40s linear infinite alternate}.vzr .vdash{animation:vd 1.4s linear infinite}.vzr .vwv{animation:vcl 3s ease-in-out infinite alternate}
+@keyframes vsp{50%{opacity:.55;transform:scale(1.12)}}@keyframes vcl{to{transform:translateX(70px)}}@keyframes vd{to{stroke-dashoffset:-44}}
+.vzr .vp:hover .vpd,.vzr .vp:focus .vpd{fill:#fff0c4;r:8}
+.vch{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin-top:10px}.vc{flex:1 1 150px;display:flex;flex-direction:column;gap:3px;padding:14px;border-radius:16px;background:linear-gradient(160deg,#5a3720,#33201a);border:1px solid #6b4429;cursor:pointer;transition:.25s}.vc:hover{transform:translateY(-4px);border-color:#d9a85f;box-shadow:0 14px 26px -14px #000}.vc b{font:700 17px 'Cormorant Garamond',serif;color:#f6ead6}.vc small{color:#cdb596}.vc em{font-style:normal;color:#d9a85f;font-weight:700;font-size:12px;margin-top:4px}
+.va{width:52px;height:52px}.va.sway{animation:sw 3s ease-in-out infinite;transform-origin:50% 90%}.va.pop{animation:pp 2.6s ease-in-out infinite}.va.roll{animation:rl 1.2s ease-in-out infinite}.va.bob{animation:bb 2s ease-in-out infinite}.va.steam{animation:pp 3s ease-in-out infinite}
+@keyframes sw{50%{transform:rotate(6deg)}}@keyframes pp{50%{transform:scale(1.1)}}@keyframes rl{50%{transform:translateX(3px)}}@keyframes bb{50%{transform:translateY(-4px)}}
+.vf{display:none;flex:0 0 22px;align-self:center;height:3px;background:repeating-linear-gradient(90deg,#d9a85f 0 6px,transparent 6px 12px);background-size:24px 3px;animation:vfa .8s linear infinite}@media(min-width:1700px){.vf{display:block}}@keyframes vfa{to{background-position:24px 0}}
+.vw{display:flex;flex-wrap:wrap;gap:14px;margin-top:12px}.vl{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 12px;border-radius:14px;cursor:pointer;border:1px solid transparent;transition:.25s;min-width:92px}.vl:hover{background:#4d312088;border-color:#d9a85f;transform:translateY(-3px)}
+.vs{display:flex;flex-wrap:wrap-reverse;width:66px;height:64px;gap:2px;align-content:flex-start;justify-content:center}.vs i{width:20px;height:12px;border-radius:5px 5px 3px 3px;background:linear-gradient(180deg,#e4c28a,#a8743f);border:1px solid #5a3720;transform-origin:bottom;animation:sk .5s both;animation-delay:var(--d)}@keyframes sk{from{transform:scaleY(0);opacity:0}}
+@media(max-width:860px){#hmb{display:inline-flex}#hm{display:none;width:100%;flex-wrap:wrap;gap:8px}header.hx #hm{display:flex}header{padding:8px 12px}#ti{font-size:21px}.dk{display:none}.hero{min-height:0;padding:28px 18px}}
+/* v7 */
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+#v .card,#v .k,#v .cd,#v .vc,#v .vl{animation:rise .55s cubic-bezier(.2,.7,.2,1) backwards;animation-delay:calc(var(--i,0)*60ms)}
+.nb{margin-left:auto;min-width:20px;height:20px;border-radius:10px;background:#c2553a;color:#fff;font:700 11px/20px Manrope;text-align:center;font-style:normal;padding:0 5px;animation:nbp 1.8s infinite}@keyframes nbp{50%{box-shadow:0 0 0 5px #c2553a44}}
+nav button.m.on .nb{background:#26150b}
+#tmb{font-size:15px;padding:4px 11px}
+.phb{position:absolute;top:8px;right:8px;width:30px;height:30px;border-radius:50%;background:#170e09aa;display:grid;place-items:center;cursor:pointer;font-size:14px}.phb:hover{background:#d9a85f}
+.vc{position:relative;overflow:hidden}.vph{height:90px;margin:-14px -14px 8px;background-size:cover;background-position:center;border-bottom:2px solid #d9a85f}.lph{width:100%;border-radius:12px;margin:10px 0;max-height:260px;object-fit:cover}
+.ot{display:grid;grid-template-columns:90px 1fr 1fr 110px;gap:10px;align-items:center;padding:10px 6px;border-bottom:1px solid #6b442966;cursor:pointer}.ot:hover{background:#6b442933}
+.otk{position:relative;height:6px;background:#4a3222;border-radius:6px;margin:0 14px;grid-column:3}.otk span{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#b87b45,#d9a85f);border-radius:6px;animation:gr 1.2s both}@keyframes gr{from{width:0!important}}
+.otk em{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:#4a3222;margin-left:-6px;border:2px solid #26150b}.otk em.on{background:#d9a85f}.otk u{position:absolute;top:-17px;margin-left:-11px;text-decoration:none;font-size:20px;animation:tk 1.2s both;transition:left .6s}@keyframes tk{from{left:0!important}}
+@media(max-width:700px){.ot{grid-template-columns:1fr auto}.otk{grid-column:1/-1;order:3;margin:14px 14px 6px}}
+.bmw{padding-top:6px}.bl{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;font-size:12.5px}.bl i{display:inline-block;width:18px;height:4px;border-radius:2px;margin-right:6px;vertical-align:middle}.bl small{flex-basis:100%}
+.bro{animation:vd 1.6s linear infinite}.bc{cursor:pointer}.bc:hover circle:nth-child(2){fill:#d9a85f;r:7}
+.scw{position:relative;border-radius:16px;overflow:hidden;background:#000;max-width:420px;aspect-ratio:1}.scw video{width:100%;height:100%;object-fit:cover}.scl{position:absolute;left:8%;right:8%;height:3px;background:#d9a85f;box-shadow:0 0 14px #d9a85f;animation:scn 2s ease-in-out infinite alternate}@keyframes scn{from{top:12%}to{top:86%}}
+#pr{display:none}
+@media print{body.pp>*:not(#pr){display:none!important}body.pp #pr{display:block;font:13px/1.5 Georgia,serif;color:#000;padding:10px}#pr h1{color:#6b4429;font-size:30px;margin:0}#pr h2{font-size:20px;border-bottom:2px solid #6b4429;padding-bottom:4px}#pr h3{color:#000;font-size:15px;margin:14px 0 4px}#pr .rs{color:#555;font-size:11px}#pr table{width:100%;font-size:12px}#pr th{background:#eee;color:#000;position:static}#pr td{white-space:normal}#pr .rg{display:grid;grid-template-columns:1fr 1fr;gap:4px 20px}#pr img{margin-top:10px}}
+/* modo claro */
+body.lt{--ink:#3b2415;--t:#3b2415;--mu:#7a5a40;--ln:#d8c3a2;--l:#d8c3a2;--w:#fffaf0;--p:#ead9bd;color-scheme:light;background:radial-gradient(110% 70% at 85% 0,#fff7e8,#f1e3cc 60%) fixed;color:#3b2415}
+body.lt h1,body.lt h2,body.lt h3,body.lt h4{color:#3b2415}
+body.lt nav{background:linear-gradient(180deg,#f0e1c8,#e4d0ae);border-right-color:#cdb596}body.lt nav button.m:hover{background:#e6d2b0}body.lt nav button.m.on{color:#26150b}body.lt .lg{color:#8a5a35}
+body.lt header{background:linear-gradient(90deg,#f4e7ce,#ebdabe);border-bottom-color:#cdb596}
+body.lt .card,body.lt .cd,body.lt .k{background:linear-gradient(155deg,#fffaf0,#f4e8d2);border-color:#d8c3a2;box-shadow:0 12px 26px -18px #6b4429}
+body.lt .k b{color:#8a5a35}body.lt .tabs a,body.lt .chain a{background:#fffaf0aa;color:#3b2415}body.lt .tabs a.on,body.lt .chain a.on{color:#26150b}
+body.lt input,body.lt select,body.lt textarea{background:#fffaf0;color:#3b2415;border-color:#cdb596}
+body.lt .hero h1,body.lt .hero h2,body.lt .hero p,body.lt .hero .st b{color:#f6ead6}body.lt .hero .st b{color:#d9a85f}body.lt .hero p b{color:#d9a85f}
+body.lt .vc{background:linear-gradient(160deg,#fffaf0,#f1e1c6)}body.lt .vc b{color:#3b2415}body.lt .vc small{color:#7a5a40}
+body.lt .pb,body.lt .otk{background:#e0cba8}body.lt tr:hover td{background:#e9d6b855}body.lt td{border-bottom-color:#e3d2b6}
+body.lt #mo .mc{background:#fffaf0}body.lt #mo{background:#3b241599}body.lt .bt.o,body.lt .bt.s{color:#8a5a35;border-color:#b87b45}body.lt .sg{color:#8a5a35}
+body.lt .hero .bt.o{color:#d9a85f}body.lt .hero .sg{color:#d9a85f}
+body.lt ::-webkit-scrollbar-track{background:#efe0c6}
+body.lt .hero .st span{color:#cdb596}
+body.lt .tabs a.on,body.lt .chain a.on{background:linear-gradient(135deg,#d9a85f,#b87b45);border-color:#b87b45}
+</style></head><body>
+<div id="wl"><canvas class="beans"></canvas><div class="in"><span class="sg">Café arábica de altura · Caranavi, La Paz · Bolivia</span><h1>Asociación Nacional de Productores de Café</h1>
+<p><b style="color:var(--g)">ANPROCA</b> · Plataforma integrada ERP, TMS, WMS e Inteligencia de Negocios para mejorar la cadena de suministro y el desempeño de exportación del café arábica. Bienvenido/a, <b id="wu"></b>.</p>
+<div class="st"><div><b data-n="13">0</b><span>indicadores oficiales</span></div><div><b data-n="4">0</b><span>sistemas integrados</span></div><div><b data-n="3">0</b><span>rutas de exportación</span></div><div><b data-n="80">0</b><span>puntos de control</span></div></div>
+<button class="bt" onclick="$('#wl').remove()">Ingresar a la plataforma</button> <button class="bt o" onclick="$('#wl').remove();go('bi',2)">Abrir panel ejecutivo</button> <button class="bt o" onclick="$('#wl').remove();go('sist',0)">Explorar sistemas</button></div></div>
+<a class="skip" href="#v">Saltar al contenido</a><nav id="nv" aria-label="Menú principal"></nav>
+<main><header><button class="bt o x" id="mb" onclick="$('#nv').classList.toggle('o')" aria-label="Menú"><svg class="i" viewBox="0 0 24 24"><path d="M3 6h18M3 12h18M3 18h18"/></svg></button><h2 id="ti"></h2><span class="sp"></span><button class="bt o x" onclick="pal()" aria-label="Buscar en la plataforma">Buscar<span class="dk"> (Ctrl+K)</span></button><button class="bt o x" id="tmb" onclick="thm(document.body.classList.contains('lt')?'d':'l')" aria-label="Cambiar a modo claro">☀</button><button class="bt o x" id="hmb" aria-label="Más opciones" aria-expanded="false" onclick="var h=this.parentElement;h.classList.toggle('hx');this.setAttribute('aria-expanded',h.classList.contains('hx'))">⋯</button><div id="hm"><span id="clk" class="clk"></span>
+<select id="us" aria-label="Usuario activo" onchange="S.cu=+this.value;if(!ok(M))M='inicio';save();R()"></select><button class="bt o x" onclick="exp()">Exportar CSV</button><button class="bt o x" onclick="print()">Imprimir</button></div></header><div id="v"></div></main><div id="tt"></div>
+<div id="pool" hidden><div class="bisec" id="eq"><h2>Dirección y operación</h2><p class="lead">Responsables registrados en la plataforma. Cada perfil entra con permisos propios a ERP, TMS, WMS y BI.</p>
+<div class="grid">
+<div class="cd pe"><div class="av">FC</div><div><h4>Félix Chuquimia Nina</h4><small>Gerente General · acceso total y reportes gerenciales</small></div></div>
+<div class="cd pe"><div class="av">AA</div><div><h4>Abednego Alipaz Mamani</h4><small>Encargado del Laboratorio del Café · calidad, lotes y catación</small></div></div>
+<div class="cd pe"><div class="av">LM</div><div><h4>Lizeth Marca</h4><small>Operaria · registro de acopio y movimientos de almacén</small></div></div>
+<div class="cd"><h4>Datos de la asociación</h4><small>Razón social: Asociación Nacional de Productores de Café (ANPROCA)<br>Producto: café arábica de exportación<br>Zona de acopio: municipio de Caranavi, 14 comunidades productoras · Destino: Planta ANPROCA, El Alto<br>Sistemas: ERP · TMS · WMS · BI</small></div></div></div><div class="bisec" id="datos"><h2>Recopilación de datos</h2><p class="lead">La plataforma toma información de los tres sistemas y de las áreas operativas. Cada flujo se sincroniza con la base central.</p>
+<div class="cd" style="margin-bottom:16px"><canvas id="flow" class="ft" style="height:300px"></canvas></div><div class="grid" id="src"></div></div><div class="bisec" id="bd"><h2>Base de datos central</h2><p class="lead">Todos los registros de la plataforma en un solo lugar: busque, filtre y consulte el historial.</p>
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px"><input id="q" aria-label="Buscar en la base de datos" placeholder="Buscar lote, ruta, pedido, responsable…" style="flex:1;min-width:220px"><select id="fs"><option value="">Todos los sistemas</option><option>ERP</option><option>TMS</option><option>WMS</option></select><select id="ft"><option value="">Todos los tipos</option></select></div>
+<div class="tw"><table><thead><tr><th>ID</th><th>Sistema</th><th>Tipo</th><th>Fecha</th><th>Responsable</th><th>Detalle</th><th>Estado</th></tr></thead><tbody id="tb"></tbody></table></div><p><small id="tc"></small></p>
+<div class="g2" style="margin-top:18px" id="bdc"></div></div><div class="bisec" id="bi"><h2>Panel ejecutivo de Inteligencia de Negocios</h2><p class="lead">Consolida exclusivamente los 13 indicadores de la investigación. Toque cualquier gráfico, fila o indicador para ampliarlo y ver sus datos.</p>
+
+<div class="g3" id="gg" style="margin-bottom:16px"></div><div class="g2" id="bic"></div></div><div class="bisec" id="ind"><h2>Los 13 indicadores</h2><p class="lead">Toque una ficha para abrir sus 14 registros de medición con gráficos.</p>
+<div class="grid" id="ixs" style="grid-template-columns:repeat(auto-fill,minmax(420px,1fr))"></div></div><div class="bisec" id="ba"><h2>Comparación antes y después</h2><p class="lead">Mejora de la gestión de la cadena de suministro y del desempeño de exportación. El índice de apoyo resume la clasificación ordinal en una escala de 0 a 100.</p><div class="g2" id="bac"></div><div class="tw" style="margin-top:16px;background:var(--p);color:var(--ink)"><table id="bat"></table></div></div><div class="bisec" id="mer"><h2>Inteligencia de mercados</h2><p class="lead">Contexto comercial del café arábica. No agrega indicadores metodológicos.</p>
+<div class="g2" id="mc"></div><div class="grid" style="margin-top:16px" id="mi"></div></div><div class="bisec" id="dec"><h2>Toma de decisiones</h2><p class="lead">De la detección del problema a la acción correctiva. Pulse el estado para avanzar el seguimiento.</p>
+<div class="g2"><div class="cd"><div class="tw" style="max-height:none;background:var(--p);color:var(--ink)"><table><thead><tr><th>Problema</th><th>Indicador</th><th>Recomendación</th><th>Acción correctiva</th><th>Responsable</th><th>Estado</th></tr></thead><tbody id="dt"></tbody></table></div></div><div class="cd"><div id="dch"></div></div></div>
+<div class="cd" style="margin-top:16px"><h4>Reportes gerenciales</h4><button class="bt" onclick="rep()">Generar reporte gerencial</button><button class="bt o" onclick="print()">Imprimir</button><pre id="rp"></pre></div></div><div class="bisec" id="gal"><h2>Galería analítica</h2><p class="lead">Un gráfico distinto por cada combinación de indicador, vista y tipo. Siga bajando: la galería se amplía sin límite.</p><div class="grid" id="gl"></div><div id="sn" style="height:40px"></div></div><b id="cnt"></b></div>
+<script>
+
+const $=s=>document.querySelector(s),K='anproca_fx4',KG=69,sum=(a,f)=>a.reduce((s,x)=>s+f(x),0);
+const RS={A:['Caranavi → Planta ANPROCA, El Alto','Caranavi (salida)|0|0;Alto Choro|40|40;Puente Armas|35|35;Yolosita|45|35;Santa Bárbara|15|15;Túnel San Rafael|30|30;Cotapata|60|60;Unduavi|45|35;Pongo|30|30;La Cumbre|60|60;Tranca de Urujara|35|25;Terminal Minasa|25|15;Planta ANPROCA, El Alto|90|60'],
+B:['El Alto → Puerto de Arica','Aduana de El Alto (salida)|0|0;Calamarca|105|90;Ayo Ayo|25|25;Patacamaya|35|30;Cañaviri|50|45;Curahuara de Carangas|125|110;Tambo Quemado|195|150;Chungará|165|135;Las Cuevas|45|45;Zapahuira|65|65;Arica|185|185;Puerto de Arica|40|35'],
+C:['El Alto → Puerto de Iquique','Aduana de El Alto (salida)|0|0;Calamarca|105|90;Ayo Ayo|25|25;Patacamaya|25|25;Oruro|135|125;Toledo|40|35;Ancaravi|65|55;Huachacalla|80|70;Sabaya|75|65;Pisiga|70|60;Pisiga Carpa|10|10;Colchane|285|165;Central Citani|15|15;Cotasaya|10|10;Escapiña|10|10;Quebe|40|40;Chusmiza|105|105;Usmagama|15|15;Pachica|50|50;Huarasiña|10|10;Huara|20|20;Pozo Almonte|45|35;Alto Hospicio|55|50;Iquique|25|25;Puerto de Iquique|20|15']};
+const RT={};for(const k in RS)RT[k]={n:RS[k][0],p:RS[k][1].split(';').map(s=>{const a=s.split('|');return[a[0],+a[1],+a[2]]})};
+const tot2=(r,i)=>sum(RT[r].p,p=>p[i]);
+const ORD=['inicio','cadena','admin','sist','erp','tms','wms','bi'];const MENU=[['inicio','INICIO','home',[]],['cadena','CADENA DE SUMINISTRO','chain',['Materia prima','Producción','Logística y transporte','Almacenaje','Distribución','Cliente final']],['sist','SISTEMATIZACIÓN EMPRESARIAL','puzzle',['Arquitectura de sistemas','Centro de integración empresarial','Flujo de información']],['erp','ERP','erp',['Clientes','Compras y socios','Costos','Ventas','Pedidos y disponibilidad','Exportaciones','Documentación']],['tms','TMS','truck',['Rutas','Transportistas','Fechas y tiempos','Costos de flete','Seguimiento','Incidentes y retrasos']],['wms','WMS','box',['Inventario','Movimientos internos','Preparación de pedidos','Existencias y lotes','Trazabilidad QR']],['bi','INTELIGENCIA DE NEGOCIOS','chart',['Recopilación','Base de datos','Panel ejecutivo','13 indicadores','Antes y después','Mercados','Decisiones','Galería']],['admin','ADMINISTRACIÓN Y USUARIOS','users',['Usuarios y roles','Actividad','Configuración','Instrumentos de investigación']]];MENU.sort((a,b)=>ORD.indexOf(a[0])-ORD.indexOf(b[0]));
+const P={Administrador:'*',Gerencia:'*',Laboratorio:'inicio cadena wms bi sist',Operaria:'inicio cadena erp tms wms sist',Compras:'inicio cadena erp bi',Almacén:'inicio cadena wms',Transporte:'inicio cadena tms',Ventas:'inicio cadena erp',Exportaciones:'inicio cadena erp tms'};
+const DOCS=['Factura comercial','Lista de empaque','Cert. de calidad','Cert. de origen','Cert. fitosanitario','Doc. de transporte','Declaración de exportación'];
+let S,M='inicio',T=0,rs='A',dep='06:00',qrc='';
+const nw=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds())};
+const SOC=[['Com. Villa El Carmen','Caranavi','Sector Norte','Caranavi',62,148,'Orgánico'],['Com. Bolinda','Caranavi','Sector Norte','Caranavi',55,126,'Comercio justo'],['Com. Villa Oriente','Caranavi','Sector Este','Caranavi',48,112,'Orgánico'],['Com. Nueva Llusta','Caranavi','Sector Sur','Caranavi',44,98,'Convencional'],['Com. Villa Montes','Caranavi','Sector Este','Caranavi',39,90,'Especialidad'],['Com. Bello Horizonte','Caranavi','Sector Norte','Caranavi',58,139,'Comercio justo'],['Com. Magallanes Sombral','Caranavi','Sector Oeste','Caranavi',36,84,'Orgánico'],['Com. Illampu San Lorenzo','Caranavi','Sector Oeste','Caranavi',51,121,'Orgánico'],['Com. Unión Camacho','Caranavi','Sector Sur','Caranavi',42,95,'Convencional'],['Com. General Villarroel','Caranavi','Sector Sur','Caranavi',47,108,'Comercio justo'],['Com. Taipiplaya','Caranavi','Sector Este','Caranavi',33,78,'Convencional'],['Com. Calama','Caranavi','Sector Oeste','Caranavi',29,66,'Especialidad'],['Com. Nogalani','Caranavi','Sector Norte','Caranavi',45,104,'Orgánico'],['Com. Uchumachi','Caranavi','Sector Este','Caranavi',37,85,'Convencional']];
+function seed(){const P2=n=>String(n).padStart(2,'0'),dt=k=>new Date(Date.UTC(2026,7,3+k)).toISOString().slice(0,10),ad=(d,x)=>new Date(Date.parse(d)+x*864e5).toISOString().slice(0,10);
+const us=[['T-000','Félix Chuquimia Nina','Gerente General','Gerencia','fchuquimia','Gerencia'],['T-00A','Abednego Alipaz Mamani','Encargado del Laboratorio del Café','Laboratorio','aalipaz','Laboratorio'],['T-00B','Lizeth Marca','Operaria','Operaciones','lmarca','Operaria'],['T-001','Rosa Mamani','Administradora de sistemas','Sistemas','rmamani','Administrador'],['T-002','Carlos Quispe','Subgerente de operaciones','Gerencia','cquispe','Gerencia'],['T-003','Lucía Condori','Jefa de compras','Compras','lcondori','Compras'],['T-004','Mario Flores','Encargado de almacén','Almacén','mflores','Almacén'],['T-005','Pedro Apaza','Coordinador de transporte','Transporte','papaza','Transporte'],['T-006','Elena Villca','Ejecutiva de ventas','Ventas','evillca','Ventas'],['T-007','Jorge Ticona','Responsable de exportaciones','Exportaciones','jticona','Exportaciones'],['T-008','Marisol Choque','Técnica de laboratorio','Laboratorio','mchoque','Laboratorio'],['T-009','Raúl Mendoza','Auxiliar de almacén','Almacén','rmendoza','Almacén'],['T-010','Sandra Colque','Auxiliar de compras','Compras','scolque','Compras'],['T-011','Nelson Gutiérrez','Supervisor de flota','Transporte','ngutierrez','Transporte'],['T-012','Verónica Limachi','Asistente de exportaciones','Exportaciones','vlimachi','Exportaciones']].map((a,i)=>({c:a[0],n:a[1],cg:a[2],ar:a[3],u:a[4],ro:a[5],on:1,f:dt(-60+i*3)}));
+const sc=SOC.map(a=>({n:a[0],mu:a[1],zo:a[2],pr:a[3],fa:a[4],ha:a[5],ce:a[6]}));
+const lots=sc.map((s,i)=>({id:'L-'+(2601+i),so:s.n,pv:s.mu+' · '+s.zo,n:Math.round(s.ha*.9),hu:+(10.4+(i*7)%14/10).toFixed(1),q:'SCA '+(82+i%6),loc:(i<8?'A-':'B-')+P2(i%8+1),f:dt(i*4),bl:0}));
+const pc=lots.map((l,i)=>({id:'C-'+(i+1),so:l.so,l:l.id,n:l.n,kg:l.n*KG,pr:318+(i*7)%26,f:l.f,st:'Recibido'}));
+const mv=lots.map(l=>({h:l.f+' 08:00',tp:'Ingreso',l:l.id,q:l.n,o:'Recepción',d:'Almacén',u:'Mario Flores'}));
+const CL=[['Pacific Crest Coffee Imports LLC','Estados Unidos','Seattle','Importador','Daniel Brooks'],['Antwerp Koffie Import NV','Bélgica','Amberes','Importador','Luc Peeters'],['Cafés du Havre SAS','Francia','Le Havre','Importador','Camille Moreau'],['Importadora Andes Café SpA','Chile','Santiago','Importador','Felipe Rojas'],['Hanseatische Kaffeerösterei GmbH','Alemania','Hamburgo','Tostador','Anna Keller'],['Rotterdam Koffie Trading B.V.','Países Bajos','Róterdam','Importador','Daan de Vries'],['Blue Ridge Roasters Inc.','Estados Unidos','Asheville','Tostador','Megan Carter'],['Gentse Koffiebranderij BV','Bélgica','Gante','Tostador','Sofie Janssens'],['Torréfaction Lumière SARL','Francia','Lyon','Tostador','Antoine Dubois'],['Tostaduría Pacífico Ltda.','Chile','Valparaíso','Tostador','Camila Soto'],['Bremer Rohkaffee Handel GmbH','Alemania','Bremen','Distribuidor','Jonas Becker'],['Amsterdamse Branderij B.V.','Países Bajos','Ámsterdam','Tostador','Sanne Bakker']];
+const cl=CL.map((a,i)=>({c:'C-'+P2(i+1),n:a[0],p:a[1],ci:a[2],tp:a[3],ct:a[4],em:'compras@'+a[0].toLowerCase().replace(/[^a-z]/g,'')+'.com',on:1}));
+const CA=[['TransAndina Ltda.','Carga seca refrigerada',28,2600,'Juan Choque'],['Logística Andina SRL','Carga seca',22,2100,'Mario Huanca'],['Cruz del Sur Cargo','Contenedor 40 pies',30,2300,'Edwin Llanos'],['Transporte Altiplano SA','Contenedor 20 pies',24,2200,'Pablo Mamani'],['Cargo Illimani','Carga seca',26,2250,'Luis Quispe'],['Andes Express Bolivia','Carga seca refrigerada',27,2650,'Freddy Apaza'],['Transcafé Caranavi','Carga seca',20,1950,'Daniel Ticona'],['Ruta del Café SRL','Carga seca',22,2050,'Rubén Flores'],['Cóndor Logística','Contenedor 40 pies',30,2350,'Héctor Condori'],['Pacha Cargo','Contenedor 20 pies',23,2150,'Óscar Vargas'],['TransPacífico Ltda.','Contenedor 40 pies',29,2400,'Ramiro Callisaya'],['Wayra Transportes','Carga seca',21,2000,'Gonzalo Pari'],['Altura Cargo','Carga seca refrigerada',26,2550,'Wilson Limachi'],['Montaña Fletes','Carga seca',22,2080,'Nelson Copa'],['Interandina Cargo','Contenedor 40 pies',30,2420,'Álvaro Nina']];
+const ca=CA.map((a,i)=>({n:a[0],ve:((2300+i*137)%9000+1000)+'-'+['ABC','XYZ','DEF','GHI','JKL'][i%5],co:a[4],cap:a[2],srv:a[1],tar:a[3]}));
+const used={},rem=lots.map(l=>l.n),o=[],tr=[];
+for(let k=0;k<20;k++){const n=30+(k*13)%41,lo={};let need=n;lots.forEach((l,i)=>{const a=Math.min(rem[i],need);if(a>0){lo[l.id]=[1+(used[l.id]||0),a];used[l.id]=(used[l.id]||0)+a;rem[i]-=a;need-=a}});
+const st=k<7?'Entregado':k<11?'En transporte':k<15?'Preparado':'Reservado',r=k%3?'B':'C',f=dt(40+k*3),id='P-'+(100+k);
+o.push({id,c:'C-'+P2(k%12+1),n,st,r,lots:lo,docs:k<11?[1,1,1,1,1,1,1]:k<15?[1,1,1,1,1,k%2,k%2]:[1,1,k%3?0:1,0,0,0,0],pr:420+(k*5)%30,f});
+if(k<15){const len=RT[r].p.length;tr.push({id:'V-'+(100+k),o:id,r,ca:k%15,dep:k<11?ad(f,1)+' 06:00':'',st:k<7?'Entregado':k<11?'En ruta':'Programado',pi:k<7?len-1:k<11?3+(k%4)*2:0,ent:k<7?ad(f,r=='B'?4:6)+' 18:30':undefined});
+if(k<11)for(const l in lo)mv.push({h:ad(f,1)+' 06:00',tp:'Salida',l,q:lo[l][1],o:'Almacén',d:'Despacho '+id,u:'Mario Flores'})}}
+for(let i=0;i<6;i++)mv.push({h:dt(60+i)+' 09:00',tp:i%2?'Reubicación':'Traslado',l:lots[i].id,q:0,o:lots[i].loc,d:lots[i].loc,u:'Raúl Mendoza'});
+const CAU=['Cola en frontera','Control aduanero','Derrumbe en vía','Neblina densa','Bloqueo de carretera','Falla mecánica','Revisión fitosanitaria','Documentación observada','Fila de camiones','Cierre temporal del paso','Lluvia fuerte','Demora en balanza','Cambio de conductor','Retén policial','Neumático averiado'],
+ACC=['Pre-registro anticipado en aduana','Revisión documental previa','Ruta alterna y aviso al cliente','Salida en horario de menor neblina','Coordinar el paso con la ABC','Mantenimiento preventivo del vehículo','Inspección fitosanitaria previa en origen','Lista de verificación de documentos','Reserva de turno en frontera','Seguimiento satelital del viaje','Convoy con vehículo de respaldo','Pesaje previo en planta','Conductor de relevo programado','Control de papeles antes de salir','Revisión de neumáticos antes del viaje'];
+const ic=CAU.map((c,i)=>{const r='ABC'[i%3],p=RT[r].p;return{id:'I-'+(i+1),r,pt:p[1+(i*5)%(p.length-1)][0],f:dt(30+i*5),min:20+(i*17)%130,ca:c,re:['Transportista','Aduana','Conductor','Coordinación TMS','Gerencia'][i%5],ac:ACC[i],st:i%3==1?'Abierto':'Cerrado'}});
+const lg=[];lots.forEach(l=>lg.push({t:l.f+' 08:00',u:'Mario Flores',s:'ERP→WMS',m:`Compra ${l.id}: ${l.n} sacos de ${l.so} → recepción y QR`}));
+o.forEach(x=>lg.push({t:x.f+' 10:00',u:'Elena Villca',s:'ERP→WMS',m:`Pedido ${x.id}: ${x.n} sacos reservados`}));
+tr.forEach(t=>{if(t.dep)lg.push({t:t.dep,u:'Pedro Apaza',s:'TMS→WMS',m:`Salida ${t.id}: sacos descontados del almacén`});if(t.ent)lg.push({t:t.ent,u:'Pedro Apaza',s:'TMS→ERP',m:`Entrega ${t.o} confirmada`})});
+lg.sort((a,b)=>b.t.localeCompare(a.t));
+return{cu:0,er:0,us,sc,cl,lots,pc,mv,o,ca,tr,ic,lg,ins:null}}
+function save(){try{const j=JSON.stringify(S);localStorage.setItem(K,j);if(Date.now()-(+localStorage.getItem(K+'_at')||0)>216e5&&j.length<2e6){localStorage.setItem(K+'_auto',j);localStorage.setItem(K+'_at',Date.now())}}catch(e){try{toast('Memoria llena: descargue un respaldo y use fotos más pequeñas')}catch(_){}}}
+try{S=JSON.parse(localStorage.getItem(K))}catch(e){}S=S||seed();
+const LG=(s,m)=>S.lg.unshift({t:nw(),u:S.us[S.cu].n,s,m});
+const bad=m=>{S.er++;LG('Error',m);save();toast(m);R()};
+const toast=m=>{const t=$('#tt');t.textContent=m;t.style.display='block';setTimeout(()=>t.style.display='none',2600)};
+const mvq=(l,t)=>sum(S.mv.filter(m=>m.l==l&&m.tp==t),m=>m.q),stock=l=>mvq(l.id,'Ingreso')-mvq(l.id,'Salida');
+const resv=l=>sum(S.o.filter(o=>o.st=='Reservado'||o.st=='Preparado'),o=>o.lots[l.id]?o.lots[l.id][1]:0);
+const avail=l=>l.bl?0:stock(l)-resv(l),tl=f=>sum(S.lots,f),cli=c=>S.cl.find(x=>x.c==c)||{n:c,p:'-'};
+const fm=m=>`${m/60|0} h ${String(m%60).padStart(2,'0')} min`;
+function hr(m){const [h,mi]=dep.split(':'),t=+h*60+ +mi+m,d=t/1440|0,x=t%1440;return String(x/60|0).padStart(2,'0')+':'+String(x%60).padStart(2,'0')+(d?` (+${d}d)`:'')}
+const B=s=>`<span class="bd ${/Entreg|Aprob|Emitid|Conect|Cerrad|Complet|Activ|Recibid|Procesad/.test(s)?'g':/Reserv|Program|Abiert|Pendien/.test(s)?'y':/Bloq|Inacti|Error/.test(s)?'r':''}">${s}</span>`;
+const kp=a=>`<div class="kp">${a.map(x=>`<div class="k"><b>${x[1]}</b><span>${x[0]}</span></div>`).join('')}</div>`;
+const tb=(h,r)=>`<div class="tw"><input class="fi" placeholder="Filtrar registros…" oninput="fl(this)"><table><thead><tr>${h.map((x,i)=>`<th onclick="so(this,${i})">${x}</th>`).join('')}</tr></thead><tbody>${r.map(x=>`<tr>${x.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+function fl(i){const q=i.value.toLowerCase();i.nextElementSibling.querySelectorAll('tbody tr').forEach(r=>r.hidden=!r.textContent.toLowerCase().includes(q))}
+function so(th,i){const b=th.closest('table').tBodies[0],a=[...b.rows],d=th.d=!th.d;a.sort((x,y)=>{const p=x.cells[i].textContent,q=y.cells[i].textContent,n=parseFloat(p)-parseFloat(q);return(isNaN(n)?p.localeCompare(q):n)*(d?1:-1)});a.forEach(r=>b.append(r))}
+function exp(){const t=[...document.querySelectorAll('#v table')];if(!t.length)return toast('No hay tablas en esta pantalla');const c=t.map(x=>[...x.rows].map(r=>[...r.cells].map(c=>'"'+c.textContent.replace(/"/g,'""')+'"').join(',')).join('\n')).join('\n\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+c],{type:'text/csv'}));a.download='ANPROCA_reporte_'+M+'.csv';a.click()}
+const ok=m=>P[S.us[S.cu].ro]=='*'||P[S.us[S.cu].ro].split(' ').includes(m);
+function go(m,t=0){M=m;T=t;R();$('#nv').classList.remove('o');scrollTo(0,0)}
+function R(){CF=[];const nv=MENU.filter(m=>ok(m[0])).map(m=>`<button class="m ${M==m[0]?'on':''}" onclick="go('${m[0]}')">${ic(m[2])}<span>${m[1]}</span></button>${M==m[0]&&m[3].length?`<div class="sub">${m[3].map((s,i)=>`<a class="${T==i?'on':''}" onclick="go('${m[0]}',${i})">${s}</a>`).join('')}</div>`:''}`).join('');
+$('#nv').innerHTML=`<div class="lg">ANPROCA<small>Café arábica · Plataforma integrada</small></div>`+nv;
+const mm=MENU.find(m=>m[0]==M);$('#ti').textContent=(/^(ERP|TMS|WMS)$/.test(mm[1])?mm[1]:mm[1].charAt(0)+mm[1].slice(1).toLowerCase())+(mm[3][T]?' · '+mm[3][T]:'');
+$('#us').innerHTML=S.us.map((u,i)=>`<option value="${i}" ${i==S.cu?'selected':''}>${u.n} (${u.ro})</option>`).join('');
+$('#v').innerHTML=``+tabsBar()+VZ()+ip(M);hook();vzInit();a11y();badges();stag();phApply()}
+setInterval(()=>$('#clk').textContent=nw(),1000);
+/* ===== ACCIONES INTEGRADAS ===== */
+function compra(so,n,pr){n=+n;const id='L-'+(2601+S.lots.length),f=new Date().toISOString().slice(0,10);S.lots.push({id,so,pv:(x=>x?x.mu+' · '+x.zo:'Caranavi')(S.sc.find(x=>x.n==so)),n,hu:11.2,q:'SCA 84',loc:'A-'+String(S.lots.length+1).padStart(2,'0'),f,bl:0});S.pc.push({id:'C-'+(S.pc.length+1),so,l:id,n,kg:n*KG,pr:+pr,f,st:'Recibido'});S.mv.push({h:nw(),tp:'Ingreso',l:id,q:n,o:'Recepción',d:'Almacén',u:S.us[S.cu].n});LG('ERP→WMS',`Compra ${id}: ${n} sacos → recepción, lote y ${n} QR generados`);save();return id}
+function pedido(c,n,r){n=+n;const av=tl(avail);if(!(n>0)||n>av)return bad(`No se puede reservar ${n} sacos: solo hay ${av} libres para exportar.`);let need=n,lots={};S.lots.forEach(l=>{const a=Math.min(avail(l),need);if(a>0){lots[l.id]=[1+sum(S.o,o=>o.lots[l.id]?o.lots[l.id][1]:0),a];need-=a}});const o={id:'P-'+(100+S.o.length),c,n,st:'Reservado',r,lots,docs:[0,0,0,0,0,0,0],pr:430,f:new Date().toISOString().slice(0,10)};S.o.push(o);LG('ERP→WMS',`Pedido ${o.id}: ${n} sacos reservados (${Object.keys(lots).join(', ')})`);save();return o}
+function prep(id){const o=S.o.find(x=>x.id==id);if(!o.docs.slice(0,4).every(x=>x))return bad(`Pedido ${id}: faltan documentos obligatorios (factura, lista de empaque, certificados de calidad y origen) para preparar.`);o.st='Preparado';const c=S.ca[S.tr.length%S.ca.length],t={id:'V-'+(100+S.tr.length),o:id,r:o.r,ca:S.tr.length%S.ca.length,dep:'',st:'Programado',pi:0};S.tr.push(t);LG('WMS',`Pedido ${id} preparado: ${o.n} QR escaneados`);LG('WMS→TMS',`Carga lista ${id}: ${o.n} sacos, ${o.n*KG} kg → viaje ${t.id} (${c.n}, ${c.ve})`);save();R()}
+function salida(tid){const t=S.tr.find(x=>x.id==tid),o=S.o.find(x=>x.id==t.o);if(!o.docs.every(x=>x))return bad(`Viaje ${tid}: expediente incompleto, faltan documentos obligatorios (${DOCS.filter((d,i)=>!o.docs[i]).join(', ')}).`);for(const l in o.lots)S.mv.push({h:nw(),tp:'Salida',l,q:o.lots[l][1],o:'Almacén',d:'Despacho '+o.id,u:S.us[S.cu].n});o.st='En transporte';t.st='En ruta';t.dep=nw();LG('TMS→WMS',`Salida ${tid}: ${o.n} sacos descontados, despacho registrado`);save();R()}
+function avz(tid){const t=S.tr.find(x=>x.id==tid);t.pi=Math.min(t.pi+1,RT[t.r].p.length-1);LG('TMS',`${tid} en ${RT[t.r].p[t.pi][0]}`);save();R()}
+function entrega(tid){const t=S.tr.find(x=>x.id==tid),o=S.o.find(x=>x.id==t.o);o.st='Entregado';t.st='Entregado';t.ent=nw();t.pi=RT[t.r].p.length-1;LG('TMS→ERP',`Entrega ${o.id} confirmada: exportación actualizada e historial de ${cli(o.c).n}`);save();R()}
+function doc(id,i){const o=S.o.find(x=>x.id==id);o.docs[i]^=1;LG('ERP',`${DOCS[i]} ${o.docs[i]?'emitido':'pendiente'} en ${id}`);save();R()}
+function inc(r,pt,min,ca){S.ic.push({id:'I-'+(S.ic.length+1),r,pt,f:new Date().toISOString().slice(0,10),min:+min,ca,re:'Transportista',ac:'Coordinar con aduana',st:'Abierto'});LG('TMS','Incidente en '+pt+': '+min+' min perdidos');save()}
+function demo(){compra('Com. Uchumachi',40,330);const o=pedido('C-04',40,'B');if(!o)return;o.docs=o.docs.map(_=>1);prep(o.id);const t=S.tr[S.tr.length-1];salida(t.id);inc('B','Tambo Quemado',90,'Fila en frontera');entrega(t.id);toast('Flujo completo ejecutado');go('sist',2)}
+function fv(id){return $('#'+id).value}
+const del=(a,i)=>askC('¿Eliminar este registro? Esta acción no se puede deshacer.',()=>{S[a].splice(i,1);save();R()},'Eliminar');
+/* ===== VISTAS ===== */
+const V={};
+/* ===== v7 ===== */
+const hp=(u,p)=>{let a=3735928559,b=1103547991,s=u+':'+p+':anp';for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);a=Math.imul(a^c,2654435761);b=Math.imul(b^c,1597334677)}a=Math.imul(a^a>>>16,2246822507)^Math.imul(b^b>>>13,3266489909);b=Math.imul(b^b>>>16,2246822507)^Math.imul(a^a>>>13,3266489909);return(4294967296*(2097151&b)+(a>>>0)).toString(36)};
+const pwOk=(u,p)=>u.ph?u.ph==hp(u.u,p):p=='anproca2026';
+function pwSet(i){const u=S.us[i],w=document.createElement('div');w.innerHTML='<label>Nueva clave (mínimo 6 caracteres)<input id="p1" type="password" autocomplete="new-password"></label><label>Repetir clave<input id="p2" type="password" autocomplete="new-password"></label><p></p><button class="bt" id="ps">Guardar clave</button><button class="bt o" id="pc">Cancelar</button>';om('Clave de '+u.n,w);$('#p1').focus();$('#pc').onclick=cm;$('#ps').onclick=()=>{const a=$('#p1').value;if(a.length<6)return toast('Use al menos 6 caracteres');if(a=='anproca2026')return toast('Elija una clave distinta a la de prueba');if(a!=$('#p2').value)return toast('Las claves no coinciden');u.ph=hp(u.u,a);LG('Admin','Clave actualizada: '+u.u);save();cm();R();toast('Clave guardada')}}
+const phGet=k=>(S.ph||{})[k]||'';
+function phPick(k){const i=document.createElement('input');i.type='file';i.accept='image/*';i.onchange=()=>{const f=i.files[0];if(!f)return;const im=new Image();im.onload=()=>{const r=Math.min(1,800/Math.max(im.width,im.height)),c=document.createElement('canvas');c.width=im.width*r;c.height=im.height*r;c.getContext('2d').drawImage(im,0,0,c.width,c.height);(S.ph=S.ph||{})[k]=c.toDataURL('image/jpeg',.68);save();R()};im.src=URL.createObjectURL(f)};i.click()}
+const phBtn=(k,t)=>`<span class="phb" role="button" tabindex="0" aria-label="${t}" onclick="event.stopPropagation();phPick('${k}')">📷</span>`;
+function bkBan(){const d=S.bk?Math.floor((Date.now()-S.bk)/864e5):null;if(d!==null&&d<7)return'';return`<div class="ban" role="alert">⚠ ${d===null?'Todavía no descargó ningún respaldo.':'Hace '+d+' días que no descarga un respaldo.'} Sus datos viven solo en este navegador. <button class="bt x" onclick="bkDown()">Descargar respaldo ahora</button></div>`}
+function autoRest(){const t=+localStorage.getItem(K+'_at'),j=localStorage.getItem(K+'_auto');if(!j)return toast('Aún no hay copia automática');askC('¿Restaurar la copia automática del '+new Date(t).toLocaleString('es-BO')+'?',()=>{try{S=JSON.parse(j);save();go('inicio');toast('Copia restaurada')}catch(e){toast('Copia dañada')}},'Restaurar')}
+/* mapa esquemático de Bolivia */
+const BOL=[[-69.6,-11],[-65.4,-9.7],[-65,-11.5],[-62.8,-13],[-60.5,-13.8],[-60.2,-15.1],[-58.3,-16.3],[-58.4,-17.7],[-57.6,-19],[-58.2,-19.8],[-62,-20],[-62.6,-22.2],[-64.5,-22.1],[-66,-22.5],[-67.1,-22.8],[-67.9,-22.9],[-68.2,-21.5],[-68.5,-20.5],[-68.6,-19.5],[-68.4,-18.9],[-69.1,-18.3],[-69.5,-17.5],[-69.5,-16.2],[-69.1,-15.2],[-69.4,-14.5],[-69,-13],[-69.6,-11]];
+const BCY={Caranavi:[-67.57,-15.83],'El Alto':[-68.19,-16.5],Patacamaya:[-67.92,-17.24],Oruro:[-67.12,-17.97],'Tambo Quemado':[-69,-18.2],Arica:[-70.31,-18.48],Pisiga:[-68.69,-19],Iquique:[-70.15,-20.21]};
+const BRT={A:['#d9a85f',[[-67.57,-15.83],[-67.75,-16.08],[-67.95,-16.28],[-68.07,-16.35],[-68.13,-16.34],[-68.19,-16.5]]],B:['#e08a4a',[[-68.19,-16.5],[-68.1,-16.9],[-67.92,-17.24],[-68.4,-17.85],[-69,-18.2],[-70.31,-18.48]]],C:['#8fae62',[[-68.19,-16.5],[-67.92,-17.24],[-67.12,-17.97],[-68.28,-18.8],[-68.69,-19],[-68.64,-19.28],[-70.15,-20.21]]]};
+const bx=l=>((l[0]+73)/15.7*560).toFixed(1),by=l=>((-9.4-l[1])/13.6*520).toFixed(1),bp=a=>a.map(l=>bx(l)+','+by(l)).join(' ');
+function vzBol(){const ci=Object.keys(BCY).map(n=>`<g class="bc" tabindex="0" role="button" aria-label="${n}" onclick="vzCity('${n}')"><circle cx="${bx(BCY[n])}" cy="${by(BCY[n])}" r="12" fill="transparent"/><circle cx="${bx(BCY[n])}" cy="${by(BCY[n])}" r="5" fill="#f3e9d9" stroke="#26150b" stroke-width="2"/><text x="${+bx(BCY[n])+(BCY[n][0]<-69.5?-9:9)}" y="${+by(BCY[n])+4}" text-anchor="${BCY[n][0]<-69.5?'end':'start'}" font-size="12" fill="#f3e9d9" stroke="#26150b" stroke-width="3" paint-order="stroke">${n}</text></g>`).join('');
+const rt=Object.keys(BRT).map(k=>`<polyline class="bro" data-k="${k}" points="${bp(BRT[k][1])}" fill="none" stroke="${BRT[k][0]}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="7 6"/><circle r="5" fill="${BRT[k][0]}" stroke="#fff" stroke-width="1.5"><animateMotion dur="${8+k.charCodeAt(0)%3*3}s" repeatCount="indefinite" path="M${BRT[k][1].map(l=>bx(l)+','+by(l)).join(' L')}"/></circle>`).join('');
+return`<div class="card vz"><h3>Mapa de las rutas de exportación</h3><div class="bmw"><svg viewBox="0 0 560 520" role="img" aria-label="Mapa esquemático de Bolivia con las rutas A, B y C" style="width:100%;max-width:640px;display:block;margin:auto"><rect width="560" height="520" fill="#2a1a11"/><polygon points="${bp([[-73,-17.4],[-70.4,-18.4],[-70.3,-19.5],[-70.2,-20.2],[-70.15,-21.5],[-70.25,-23],[-73,-23]])}" fill="#27413f"/><polygon points="${bp(BOL)}" fill="#7a4b27" stroke="#d9a85f" stroke-width="2" stroke-linejoin="round"/><text x="330" y="200" font-size="22" fill="#f3e9d977" font-family="Georgia,serif" letter-spacing="6">BOLIVIA</text><text x="12" y="480" font-size="14" fill="#9fc1b8" font-family="Georgia,serif" font-style="italic">Océano Pacífico</text>${rt}${ci}</svg><div class="bl">${Object.keys(BRT).map(k=>`<span><i style="background:${BRT[k][0]}"></i>Ruta ${k} · ${RT[k].n}</span>`).join('')}<small>Mapa esquemático referencial, no a escala. Toque una ciudad.</small></div></div></div>`}
+function vzCity(n){const w=document.createElement('div'),u=Object.keys(RT).filter(k=>RT[k].p.some(p=>p[0].includes(n.split(' ')[0]))).map(k=>'Ruta '+k).join(', ')||'Referencia geográfica';w.innerHTML=`<div class="fl"><div><span>Ciudad / punto</span>${n}</div><div><span>Coordenadas aprox.</span>${BCY[n][1].toFixed(2)}°, ${BCY[n][0].toFixed(2)}°</div><div><span>Rutas que pasan</span>${u}</div></div>`;om(n,w)}
+/* pedidos y viajes en movimiento */
+const OST=['Reservado','Preparado','En transporte','Entregado'];
+function vzOrders(){return`<div class="card vz"><h3>Pedidos en movimiento</h3><small>Cada camión avanza según el estado real del pedido. Toque uno para ver su línea de tiempo.</small>${S.o.map(o=>{const i=Math.max(0,OST.indexOf(o.st));return`<div class="ot" role="button" tabindex="0" onclick="vzOrd('${o.id}')"><b>${o.id}</b><small>${o.n} sacos · ${o.f}</small><div class="otk"><span style="width:${i/3*100}%"></span>${OST.map((s,k)=>`<em class="${k<=i?'on':''}" style="left:${k/3*100}%" title="${s}"></em>`).join('')}<u style="left:${i/3*100}%">🚚</u></div>${B(o.st)}</div>`}).join('')}</div>`}
+function vzTrips(){return`<div class="card vz"><h3>Camiones en ruta</h3>${S.tr.map(t=>{const p=RT[t.r].p,f=t.pi/(p.length-1);return`<div class="ot" role="button" tabindex="0" onclick="vr='${t.r}';go('tms',0)"><b>${t.id}</b><small>Ruta ${t.r} · ${p[t.pi][0]}</small><div class="otk"><span style="width:${f*100}%"></span><u style="left:${f*100}%">🚚</u></div>${B(t.st)}</div>`}).join('')}</div>`}
+function qrImg(t,z){const d=document.createElement('div');new QRCode(d,{text:t,width:z});return d.firstChild.toDataURL()}
+function vzOrd(id){const o=S.o.find(x=>x.id==id),i=Math.max(0,OST.indexOf(o.st)),t=S.tr.find(x=>x.o==id),dn=o.docs.filter(x=>x).length,loss=sum(S.ic.filter(c=>c.r==o.r),c=>c.min),w=document.createElement('div');
+w.innerHTML=`<div class="fl"><div><span>Cliente</span>${cli(o.c).n}</div><div><span>Sacos / kg</span>${o.n} · ${o.n*KG}</div><div><span>Ruta</span>${RT[o.r]?RT[o.r].n:'-'}</div><div><span>Documentos</span>${dn} de 7</div><div><span>Viaje</span>${t?t.id+' · '+RT[t.r].p[t.pi][0]:'Sin viaje aún'}</div><div><span>Retraso por incidentes</span>${loss} min</div></div><div class="tl">${[['Reservado','Café reservado desde el inventario'],['Preparado','Lotes preparados y etiquetados con QR'],['En transporte','Camión en ruta hacia el destino'],['Entregado','Entrega confirmada al cliente']].map((s,k)=>`<div class="${k<=i?'dn':''}"><b>${s[0]}</b> ${k<i?'✔':k==i?'● actual':'pendiente'}<br><small>${s[1]}</small></div>`).join('')}</div><button class="bt" id="rp">Imprimir resumen (PDF)</button>`;om('Pedido '+id,w);$('#rp').onclick=()=>rpt('Resumen de exportación '+id,`<div class="rg"><div><b>Pedido</b> ${o.id}</div><div><b>Cliente</b> ${cli(o.c).n}</div><div><b>Fecha</b> ${o.f}</div><div><b>Estado</b> ${o.st}</div><div><b>Sacos</b> ${o.n} (${o.n*KG} kg)</div><div><b>Ruta</b> ${RT[o.r]?RT[o.r].n:'-'}</div><div><b>Documentos</b> ${dn} de 7</div><div><b>Viaje</b> ${t?t.id:'-'}</div></div><h3>Lotes asignados</h3><table><tr><th>Lote</th><th>Sacos</th></tr>${Object.keys(o.lots).map(l=>`<tr><td>${l}</td><td>${o.lots[l][1]}</td></tr>`).join('')}</table><img src="${qrImg(o.id,120)}" width="110" alt="QR del pedido">`)}
+function rpt(t,h){const p=document.createElement('div');p.id='pr';p.innerHTML=`<h1>ANPROCA</h1><p class="rs">Asociación Nacional de Productores de Café · Caranavi, La Paz, Bolivia</p><h2>${t}</h2>${h}<p class="rs">Emitido: ${new Date().toLocaleString('es-BO')} · ${S.us[S.cu].n}</p>`;document.body.append(p);document.body.classList.add('pp');cm();const e=()=>{document.body.classList.remove('pp');p.remove();removeEventListener('afterprint',e)};addEventListener('afterprint',e);setTimeout(()=>{print();setTimeout(()=>{if(p.isConnected)e()},1500)},150);toast('En la ventana de impresión elija "Guardar como PDF"')}
+/* cámara QR mejorada */
+async function cam(){const w=document.createElement('div');w.innerHTML='<div class="scw"><video id="cv2" playsinline muted></video><i class="scl"></i></div><p><small id="cs">Apunte al código QR del saco o lote.</small></p><button class="bt o" id="tq" hidden>Linterna</button><button class="bt o" id="ph2">Usar una foto del QR</button>';om('Escanear código QR',w);const done=v=>{cm();qrShow(v)},det=('BarcodeDetector' in window)?new BarcodeDetector({formats:['qr_code']}):null;
+$('#ph2').onclick=()=>{const i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');i.onchange=async()=>{if(!det)return toast('Este navegador no lee QR. Use Chrome en Android o escriba el código.');try{const b=await createImageBitmap(i.files[0]),r=await det.detect(b);r.length?done(r[0].rawValue):toast('No se encontró un QR en la foto')}catch(e){toast('No se pudo leer la foto')}};i.click()};
+if(!det){$('#cs').textContent='Este navegador no puede leer QR con la cámara. Escriba el código manualmente.';return}
+let s;try{s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}})}catch(e){$('#cs').textContent='Cámara no disponible o sin permiso. Use una foto o el código manual.';return}
+const v=$('#cv2');v.srcObject=s;await v.play();const tr=s.getVideoTracks()[0];if(tr.getCapabilities&&tr.getCapabilities().torch){const b=$('#tq');b.hidden=0;let on=0;b.onclick=()=>{on^=1;tr.applyConstraints({advanced:[{torch:!!on}]})}}
+const iv=setInterval(async()=>{if(!mo.classList.contains('on')||!v.isConnected){clearInterval(iv);s.getTracks().forEach(t=>t.stop());return}try{const r=await det.detect(v);if(r.length){clearInterval(iv);s.getTracks().forEach(t=>t.stop());done(r[0].rawValue)}}catch(e){}},350)}
+function badges(){const n={erp:S.o.filter(o=>o.st!='Entregado'&&o.docs.includes(0)).length,tms:S.ic.filter(i=>i.st=='Abierto').length,wms:S.lots.filter(l=>l.bl).length+(tl(avail)<60?1:0),admin:S.us.filter(u=>u.on&&!u.ph).length};for(const k in n)if(n[k]){const b=document.querySelector(`#nv button.m[onclick="go('${k}')"]`);if(b){const i=document.createElement('i');i.className='nb';i.textContent=n[k];i.title=k=='admin'?'Usuarios con clave de prueba':'Pendientes';b.append(i)}}}
+function thm(t){document.body.classList.toggle('lt',t=='l');try{localStorage.setItem('anp_th',t)}catch(e){}const b=$('#tmb');if(b){b.textContent=t=='l'?'☾':'☀';b.setAttribute('aria-label',t=='l'?'Cambiar a modo oscuro':'Cambiar a modo claro')}document.querySelectorAll('canvas').forEach(c=>c._c&&c._c.t!='route'&&c._c.t!='flow'&&c.clientWidth&&draw(c,1))}
+function stag(){document.querySelectorAll('#v .kp,#v .g2,#v .grid,#v .ig,#v .g3,#v .vch,#v .vw').forEach(p=>[...p.children].forEach((c,i)=>c.style.setProperty('--i',Math.min(i,12))))}
+function phApply(){const h=document.querySelector('#v .hero');if(h&&phGet('hero'))h.style.cssText+=`;background:linear-gradient(#170e09bb,#170e0988),url(${phGet('hero')}) center/cover`}
+
+/* ===== v6: respaldo, ventanas propias, visuales animados ===== */
+function askC(m,fn,ok){const w=document.createElement('div');w.innerHTML='<p>'+m+'</p><button class="bt d" id="yc">'+(ok||'Confirmar')+'</button><button class="bt o" id="nc">Cancelar</button>';om('Confirmar acción',w);$('#yc').onclick=()=>{cm();fn()};$('#nc').onclick=cm;$('#nc').focus()}
+function askP(t,v,fn){const w=document.createElement('div');w.innerHTML='<label>'+t+'<input id="pi"></label><p></p><button class="bt" id="yp">Guardar</button><button class="bt o" id="np">Cancelar</button>';om('Editar',w);const i=$('#pi');i.value=v;i.focus();const g=()=>{const x=i.value.trim();cm();if(x)fn(x)};$('#yp').onclick=g;i.onkeydown=e=>{if(e.key=='Enter')g()};$('#np').onclick=cm}
+function bkDown(){S.bk=Date.now();save();const b=new Blob([JSON.stringify(S)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ANPROCA_respaldo_'+new Date().toISOString().slice(0,10)+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000);toast('Respaldo descargado')}
+function bkUp(el){const f=el.files[0];if(!f)return;const r=new FileReader();r.onload=()=>{try{const o=JSON.parse(r.result);if(!o||!o.us||!o.lots)throw 0;askC('¿Restaurar este respaldo? Reemplaza los datos actuales.',()=>{S=o;save();go('inicio');toast('Respaldo restaurado')},'Restaurar')}catch(e){toast('El archivo no es un respaldo válido de ANPROCA')}el.value=''};r.readAsText(f)}
+let vr='A';
+const vzTree=n=>{let s='';for(let i=0;i<n;i++){const x=20+i*37%330,y=272+(i*11%14)-i%3*2;s+=`<path d="M${x} ${y}l6 -16l6 16z" fill="#5b6a34" opacity=".${5+i%4}"/>`}return s};
+function vzRoute(r){r=r||vr;const P=RT[r].p,W=900,pa={A:'M40 285C160 280 200 230 300 238S440 200 520 215S660 160 760 175S840 120 870 105',B:'M40 110C180 125 220 170 330 160S480 215 560 225S700 255 780 262S850 280 870 285',C:'M40 110C180 125 220 170 330 160S480 215 560 225S700 255 780 262S850 280 870 285'}[r],sea=r!='A';
+return`<div class="card vz" style="padding:0;overflow:hidden"><div style="padding:14px 16px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><h3 style="margin:0;flex:1;min-width:200px">Mapa de ruta en vivo · ${RT[r].n}</h3>${['A','B','C'].map(k=>`<a class="bt x ${k==r?'':'o'}" role="button" tabindex="0" onclick="vr='${k}';R()">Ruta ${k}</a>`).join('')}</div>
+<svg class="vzr" data-r="${r}" viewBox="0 0 ${W} 320" role="img" aria-label="Mapa animado de la ruta ${RT[r].n}" style="width:100%;display:block"><defs><linearGradient id="sk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d120b"/><stop offset=".55" stop-color="#6b4429"/><stop offset="1" stop-color="#d9a85f"/></linearGradient><radialGradient id="su"><stop offset="0" stop-color="#fff0c4"/><stop offset="1" stop-color="#fff0c400"/></radialGradient><linearGradient id="gr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a2314"/><stop offset="1" stop-color="#1d120b"/></linearGradient></defs>
+<rect width="${W}" height="320" fill="url(#sk)"/><circle class="vsun" cx="720" cy="120" r="90" fill="url(#su)"/><circle cx="720" cy="120" r="24" fill="#fff0c4"/>
+<g class="vcl" fill="#f3e9d9" opacity=".18"><ellipse cx="150" cy="60" rx="70" ry="12"/><ellipse cx="190" cy="52" rx="45" ry="10"/><ellipse cx="520" cy="85" rx="80" ry="11"/></g>
+<path d="M0 210L120 120L170 160L260 80L350 170L440 110L560 190L650 130L760 200L900 140V320H0z" fill="#5a3720" opacity=".75"/><path d="M240 100L260 80L282 102L268 96L258 108z" fill="#f3e9d9" opacity=".8"/><path d="M0 250L90 190L190 235L300 175L420 240L540 185L680 245L800 195L900 235V320H0z" fill="#3a2314"/>
+${sea?'<rect x="760" y="250" width="140" height="70" fill="#31504f" opacity=".7"/><path class="vwv" d="M760 262q18-8 36 0t36 0t36 0t36 0" stroke="#9fc1b8" fill="none" opacity=".6"/>':vzTree(16)}
+<rect y="268" width="${W}" height="52" fill="url(#gr)" opacity=".85"/>
+<path id="vpath" d="${pa}" fill="none" stroke="#120a06" stroke-width="12" stroke-linecap="round"/><path class="vdash" d="${pa}" fill="none" stroke="#d9a85f" stroke-width="2" stroke-dasharray="10 12" stroke-linecap="round"/>
+<g class="vst"></g><g class="vtk" style="pointer-events:none"><rect x="-15" y="-13" width="22" height="12" rx="2" fill="#b87b45"/><rect x="7" y="-10" width="9" height="9" rx="2" fill="#f3e9d9"/><circle cx="-8" cy="0" r="3.5" fill="#120a06"/><circle cx="10" cy="0" r="3.5" fill="#120a06"/></g></svg>
+<div style="padding:4px 16px 14px"><small>Toque cualquier parada para ver sus tiempos real y optimizado. El camión recorre la ruta continuamente; pase el cursor sobre el mapa para detenerlo.</small></div></div>`}
+function vzInit(){document.querySelectorAll('svg.vzr').forEach(sv=>{if(sv._i)return;sv._i=1;const r=sv.dataset.r,P=RT[r].p,pa=sv.querySelector('#vpath'),L=pa.getTotalLength(),tk=sv.querySelector('.vtk'),g=sv.querySelector('.vst'),T0=tot2(r,1),T2=tot2(r,2);let c=0,h='',pos=[];
+P.forEach((p,i)=>{c+=p[1];const f=c/T0,pt=pa.getPointAtLength(L*f);pos.push(L*f);const e=i==0||i==P.length-1||i%3==0;h+=`<g class="vp" tabindex="0" role="button" aria-label="${p[0]}" data-i="${i}" style="cursor:pointer"><circle cx="${pt.x}" cy="${pt.y}" r="14" fill="transparent"/><circle class="vpd" cx="${pt.x}" cy="${pt.y}" r="${e?6:4}" fill="#d9a85f" stroke="#26150b" stroke-width="2"/>${e?`<text x="${pt.x>650?pt.x-9:pt.x+9}" text-anchor="${pt.x>650?'end':'start'}" y="${pt.y+(pt.x<150?20:-10)}" font-size="13" fill="#f3e9d9" stroke="#26150b" stroke-width="3" paint-order="stroke">${p[0].replace(/ \(salida\)/,'').slice(0,22)}</text>`:''}</g>`});g.innerHTML=h;
+const sh=i=>{const p=P[i];let a=0,b=0;for(let k=0;k<=i;k++){a+=P[k][1];b+=P[k][2]}const w=document.createElement('div');w.innerHTML=`<div class="fl"><div><span>Tramo (real)</span>${fm(p[1])}</div><div><span>Tramo (optimizado)</span>${fm(p[2])}</div><div><span>Acumulado real</span>${fm(a)} · llegada ${hr(a)}</div><div><span>Acumulado optimizado</span>${fm(b)} · llegada ${hr(b)}</div><div><span>Avance de la ruta</span>${Math.round(a/T0*100)}%</div><div><span>Ahorro posible</span>${fm(Math.max(0,a-b))}</div></div><div class="pb"><i style="width:${a/T0*100}%"></i></div>`;om('Parada '+(i+1)+' de '+P.length+' · '+p[0],w)};
+g.querySelectorAll('.vp').forEach(e=>{e.onclick=()=>sh(+e.dataset.i);e.onkeydown=k=>{if(k.key=='Enter'||k.key==' '){k.preventDefault();sh(+e.dataset.i)}}});
+let t=0,pz=false;sv.onmouseenter=()=>pz=true;sv.onmouseleave=()=>pz=false;const st=matchMedia('(prefers-reduced-motion:reduce)').matches;
+(function f(){if(!sv.isConnected)return;if(!pz&&!st)t=(t+.0012)%1;const d=L*(st?.5:t),a=pa.getPointAtLength(d),b=pa.getPointAtLength(Math.min(L,d+2)),ang=Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI;tk.setAttribute('transform',`translate(${a.x} ${a.y-4}) scale(1.5) rotate(${Math.max(-35,Math.min(35,ang))})`);requestAnimationFrame(f)})()})}
+const vzSt=[['Materia prima','Café cereza de 14 comunidades','cadena',0,'M12 34c0-10 4-18 10-24 6 6 10 14 10 24M22 10v26M22 20l-6-5M22 26l7-6','sway'],['Producción','Beneficiado, secado y selección','cadena',1,'M8 30h28M12 30l4-14h12l4 14M18 16v-6h8v6','pop'],['Logística y transporte','Caranavi → El Alto → puerto','cadena',2,'M6 30V16h20v14M26 22h8l4 8v0H26M12 34a3 3 0 106 0M28 34a3 3 0 106 0','roll'],['Almacenaje','Lotes con QR en la planta','cadena',3,'M6 34V16l16-8 16 8v18zM14 34V24h16v10','pop'],['Distribución','Pedidos y exportaciones','cadena',4,'M22 6v30M10 18l12-12 12 12M8 38h28','bob'],['Cliente final','Café en la taza del mundo','cadena',5,'M10 18h20v10a8 8 0 01-8 8h-4a8 8 0 01-8-8zM30 21h4a4 4 0 010 8h-4M16 6c-2 3 2 4 0 7M22 6c-2 3 2 4 0 7','steam']];
+function vzChain(){const n=[tl(l=>l.n)+' sacos acopiados',Math.round(tl(l=>l.n*KG)*.97)+' kg procesados',S.tr.length+' viajes registrados',tl(avail)+' sacos disponibles',S.o.length+' pedidos',S.o.filter(o=>o.st=='Entregado').length+' entregas'];
+return`<div class="card vz"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><h3 style="margin:0;flex:1">Cadena de suministro · del cafetal a la taza</h3><a class="bt o x" role="button" tabindex="0" onclick="phPick('hero')">📷 Foto de portada</a></div><div class="vch">${vzSt.map((s,i)=>`<a class="vc" role="button" tabindex="0" onclick="go('${s[2]}',${s[3]})">${phGet('st'+i)?`<div class="vph" style="background-image:url(${phGet('st'+i)})"></div>`:''}${phBtn('st'+i,'Agregar foto a '+s[0])}<svg viewBox="0 0 44 44" class="va ${s[5]}" aria-hidden="true"><path d="${s[4]}" fill="none" stroke="#d9a85f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><b>${s[0]}</b><small>${s[1]}</small><em>${n[i]}</em></a>${i<5?'<span class="vf"></span>':''}`).join('')}</div></div>`}
+function vzWare(){return`<div class="card vz"><h3>Bodega en vivo · sacos por lote</h3><small>Toque un lote para ver su ficha y su código QR.</small><div class="vw">${S.lots.map((l,i)=>{const s=stock(l),m=s<=0?0:Math.min(12,Math.max(1,Math.round(s/Math.max(...S.lots.map(stock),1)*12)));return`<a class="vl" role="button" tabindex="0" onclick="vzLot(${i})"><div class="vs">${Array.from({length:m},(_,k)=>`<i style="--k:${k};--d:${i*.08+k*.05}s"></i>`).join('')}</div><b>${l.id}</b><small>${s>0?s+' sacos':'despachado'}${l.bl?' · bloqueado':''}</small></a>`}).join('')}</div></div>`}
+function vzLot(i){const l=S.lots[i],w=document.createElement('div');w.innerHTML=`<div class="lab" style="margin:0 0 10px"><div id="qrm"></div><div><b>ANPROCA</b><br>Lote ${l.id}<br>${stock(l)} sacos · ${stock(l)*KG} kg</div></div><div class="fl"><div><span>Productor</span>${l.so}</div><div><span>Procedencia</span>${l.pv}</div><div><span>Ingreso</span>${l.f}</div><div><span>Calidad</span>${l.q}</div><div><span>Humedad</span>${l.hu} %</div><div><span>Ubicación</span>${l.loc}</div></div>${phGet('lot'+l.id)?`<img class="lph" src="${phGet('lot'+l.id)}" alt="Foto del lote ${l.id}">`:''}<p></p><button class="bt o x" id="lp1">📷 Foto del lote</button><button class="bt x" id="lp2">Imprimir hoja del lote (PDF)</button>`;om('Lote '+l.id,w);$('#lp1').onclick=()=>{cm();phPick('lot'+l.id)};$('#lp2').onclick=()=>rpt('Hoja de lote '+l.id,`<div class="rg"><div><b>Lote</b> ${l.id}</div><div><b>Productor</b> ${l.so}</div><div><b>Procedencia</b> ${l.pv}</div><div><b>Ingreso</b> ${l.f}</div><div><b>Calidad</b> ${l.q}</div><div><b>Humedad</b> ${l.hu} %</div><div><b>Ubicación</b> ${l.loc}</div><div><b>Existencia</b> ${stock(l)} sacos (${stock(l)*KG} kg)</div></div>${phGet('lot'+l.id)?`<img src="${phGet('lot'+l.id)}" width="300" alt="">`:''}<p></p><img src="${qrImg(l.id,140)}" width="130" alt="QR del lote">`);if(window.QRCode)new QRCode($('#qrm'),{text:l.id,width:96,height:96})}
+function vzStats(){const m=mes(),act=S.o.filter(o=>o.st!='Entregado').length,ent=S.o.filter(o=>o.st=='Entregado').length,al=S.ic.filter(i=>i.st=='Abierto').length+S.o.filter(o=>o.docs.includes(0)&&o.st!='Entregado').length+(tl(avail)<60?1:0);
+return`<h3 style="margin:22px 0 10px">Resumen operativo</h3>`+kp([['Usuarios registrados',S.us.length],['Operaciones realizadas',S.lg.length],['Pedidos activos',act],['Inventario disponible (sacos)',tl(avail)],['Sacos registrados',tl(l=>l.n)],['Lotes existentes',S.lots.length],['Viajes programados',S.tr.filter(t=>t.st=='Programado').length],['Exportaciones activas',act],['Entregas realizadas',ent],['Alertas pendientes',al]])+`<div class="g2"><div class="card"><h3>Compras por lote (sacos)</h3>${bars(S.lots.map(l=>l.id),S.lots.map(l=>l.n))}</div><div class="card"><h3>Inventario disponible por lote</h3>${bars(S.lots.map(l=>l.id),S.lots.map(avail),'#6f4a30')}</div><div class="card"><h3>Transporte: horas real vs optimizado</h3>${bars(['Real A','Opt A','Real B','Opt B','Real C','Opt C'],['A','B','C'].flatMap(r=>[+(tot2(r,1)/60).toFixed(1),+(tot2(r,2)/60).toFixed(1)]),'#c99a2e')}</div><div class="card"><h3>Costos por concepto (USD)</h3>${bars(['Adquisición','Fletes','Otros'],[cost().adq,cost().fl,cost().ot],'#a8452f')}</div><div class="card"><h3>Acopio y pedidos por mes (kg)</h3>${crv([{n:'Acopio',v:m.a},{n:'Pedidos',v:m.p}],m.ms,520,210,1)}</div><div class="card"><h3>Embudo de pedidos</h3>${fun()}</div><div class="card"><h3>Cumplimiento de pedidos</h3><p>${ent} de ${S.o.length} pedidos entregados</p><div class="pb"><i style="width:${ent/S.o.length*100}%"></i></div><h3 style="margin-top:14px">Pedidos por estado</h3>${['Reservado','Preparado','En transporte','Entregado'].map(s=>`${B(s)} ${S.o.filter(o=>o.st==s).length} `).join(' ')}</div></div>`}
+function VZ(){let h=V[M]();if(M=='tms'){if(T==0)h=vzRoute()+vzBol()+h;if(T==4)h=vzTrips()+h}if(M=='wms'&&T==0)h=vzWare()+h;if(M=='erp'){if(T==1)h=vzWare()+h;if(T==4)h=vzOrders()+h}if(M=='cadena'){h=vzChain()+h;if(T==2)h=vzRoute()+vzBol()+h;if(T==4)h=vzOrders()+h}if(M=='admin'&&T==2)h=bkBan()+h;if(M=='bi'&&BIT[T][0]=='bi')h+=vzStats();return h}
+function a11y(){document.querySelectorAll('[onclick]:not(button):not(a[href]):not(input):not(label):not(select)').forEach(e=>{if(!e.getAttribute('role'))e.setAttribute('role','button');if(!e.hasAttribute('tabindex'))e.tabIndex=0});document.querySelectorAll('canvas:not([role])').forEach(c=>{if(c.classList.contains('beans')){c.setAttribute('aria-hidden','true');return}const h=c.closest('.card,.cd'),t=h&&h.querySelector('h3,h4');c.setAttribute('role','img');c.setAttribute('aria-label',(t?t.textContent:'Gráfico')+' (toque para ampliar)')})}
+addEventListener('keydown',e=>{const t=e.target;if((e.key=='Enter'||e.key==' ')&&t.getAttribute&&t.getAttribute('role')=='button'&&t.tagName!='BUTTON'&&t.tagName!='INPUT'){e.preventDefault();t.click()}});
+
+const chain=t=>`<div class="chain">${['Materia prima','Producción','Logística y transporte','Almacenaje','Distribución','Cliente final'].map((s,i)=>`<a class="${t==i?'on':''}" onclick="go('cadena',${i})">${s}${i<5?' ›':''}</a>`).join('')}</div>`;
+V.inicio=()=>{const u=S.us[S.cu];return`${bkBan()}${hero(u)}${vzChain()}${vzRoute()}${vzBol()}<div data-pool="eq"></div>${acc()}<div class="g2"><div class="card"><h3>Iniciar sesión</h3><form onsubmit="event.preventDefault();const x=S.us.findIndex(u=>u.u==fv('lu')&&u.on&&pwOk(u,fv('lp')));x<0?toast('Usuario, contraseña o estado incorrectos'):(S.cu=x,LG('Acceso','Inicio de sesión'),save(),go('inicio'))"><label>Usuario<input id="lu" placeholder="rmamani"></label><label>Contraseña<input id="lp" type="password" placeholder="Contraseña"></label><button class="bt">Entrar</button></form><p><small>Registro de nuevos usuarios: Administración y usuarios.</small></p></div><div class="card"><h3>Alertas</h3>${S.ic.filter(i=>i.st=='Abierto').map(i=>`<p><svg class="i" viewBox="0 0 24 24"><path d="M12 3l10 18H2zM12 10v5M12 18v.01"/></svg> Incidente abierto en ${i.pt} (${i.min} min perdidos)</p>`).join('')}${S.o.filter(o=>o.docs.includes(0)&&o.st!='Entregado').map(o=>`<p><svg class="i" viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6zM14 2v6h6M9 13h8M9 17h8"/></svg> Pedido ${o.id}: documentos pendientes (${o.docs.filter(x=>!x).length})</p>`).join('')}${tl(avail)<60?'<p><svg class="i" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10"/></svg> Disponibilidad para exportar baja</p>':''}</div></div>`};
+function cost(){const adq=sum(S.pc,p=>p.n*p.pr),fl=sum(S.tr,t=>flete(t).tot),v=sum(S.o,o=>o.n*o.pr);return{adq,fl,ac:adq*.03,pr:adq*.04,ad:adq*.02,al:adq*.015,ex:v*.025,ot:adq*.01,tot:0}}
+function socios(){const z=[...new Set(S.sc.map(s=>s.zo))],sk=s=>sum(S.lots.filter(l=>l.so==s.n),l=>l.n);return kp([['Comunidades',S.sc.length],['Sectores de acopio',z.length],['Familias productoras',sum(S.sc,s=>s.fa)],['Hectáreas',sum(S.sc,s=>s.ha)]])+`<div class="g2"><div class="card"><h3>Sacos acopiados por sector</h3>${ch({t:'hbar',l:z,s:[{v:z.map(q=>sum(S.sc.filter(s=>s.zo==q),sk))}]},230)}</div><div class="card"><h3>Comunidades por sector</h3>${ch({t:'donut',l:z,c:S.sc.length+'',s:[{v:z.map(q=>S.sc.filter(s=>s.zo==q).length)}]},230)}</div></div><div class="card"><h3>Comunidades acopiadoras</h3>${tb(['Código','Comunidad','Municipio','Sector','Provincia','Familias','Hectáreas','Certificación','Sacos acopiados'],S.sc.map((s,i)=>['S-'+String(i+1).padStart(2,'0'),s.n,s.mu,s.zo,s.pr,s.fa,s.ha,s.ce,sk(s)]))}</div>`}
+const flete=t=>{const b=S.ca[t.ca].tar*({A:.3,B:1,C:1.2}[t.r]),c=b*.35,p=b*.08,v=b*.06,f=t.r=='A'?0:180;return{b,c,p,v,f,tot:Math.round(b+c+p+v+f)}};
+V.cadena=()=>{const h=chain(T);let c;
+if(T==0)c=kp([['Sacos recibidos',tl(l=>l.n)],['Peso (kg)',tl(l=>l.n*KG)],['Socios acopiadores',new Set(S.lots.map(l=>l.so)).size]])+tb(['Recepción','Comunidad productora','Procedencia','Café','Sacos','kg','Calidad','Humedad %','Fecha'],S.lots.map(l=>[l.id,l.so,l.pv,'Arábica lavado · '+(S.sc.find(s=>s.n==l.so)||{ce:'Convencional'}).ce,l.n,l.n*KG,l.q,l.hu,l.f]));
+if(T==1)c=tb(['Lote','Recibido kg','Procesado kg','Merma %','Rendimiento %','Fecha','Estado'],S.lots.map((l,i)=>{const m=2+i%3;return[l.id,l.n*KG,Math.round(l.n*KG*(1-m/100)),m,100-m,l.f,B('Procesado')]}))+'<small>Parte desde el café ya acopiado (recepción, clasificación, control de calidad).</small>';
+if(T==2)c=`<div class="g2">${['A','B','C'].map(r=>`<div class="card"><b>${RT[r].n}</b><p>${fm(tot2(r,1))} real · ${fm(tot2(r,2))} optimizado</p><button class="bt s" onclick="rs='${r}';go('tms',0)">Ver ruta</button></div>`).join('')}</div>`+tb(['Viaje','Ruta','Transportista','Vehículo','Conductor','Estado'],S.tr.map(t=>[t.id,RT[t.r].n,S.ca[t.ca].n,S.ca[t.ca].ve,S.ca[t.ca].co,B(t.st)]));
+if(T==3)c=tb(['Lote','Ubicación','Sacos','Stock','Peso almacenado kg','Ocupación','Estado'],S.lots.map(l=>[l.id,l.loc,l.n,stock(l),stock(l)*KG,`<div class="pb" style="width:90px"><i style="width:${stock(l)/l.n*100}%"></i></div>`,l.bl?B('Bloqueado'):B('Aprobado')]));
+if(T==4)c=tb(['Pedido','Cliente','Sacos','kg','Ruta/Puerto','Estado'],S.o.map(o=>[o.id,cli(o.c).n,o.n,o.n*KG,RT[o.r].n,B(o.st)]));
+if(T==5)c=tb(['Cliente','País','Solicitado','Entregado','Cumplimiento'],S.cl.map(k=>{const a=S.o.filter(o=>o.c==k.c),s=sum(a,o=>o.n),e=sum(a.filter(o=>o.st=='Entregado'),o=>o.n);return[k.n,k.p,s,e,s?Math.round(e/s*100)+'%':'–']}));
+return h+`<div class="card">${c}</div>`};
+V.sist=()=>{if(T==0)return`<div class="card">${ch({t:'flow',s:[{v:[0]}],n:[['ERP',.5,.17],['WMS',.14,.72],['TMS',.86,.72],['BI',.5,.9]],e:[[0,1],[0,2],[1,2],[1,3],[2,3],[0,3]]},300)}<div class="fr">${[['erp','ERP'],['tms','TMS'],['wms','WMS'],['bi','Inteligencia de Negocios']].map(a=>`<button class="bt s" onclick="go('${a[0]}')">Abrir ${a[1]}</button>`).join('')}</div><p>ERP gobierna compras, clientes, ventas, pedidos y documentos. WMS gobierna inventario, lotes y QR. TMS gobierna rutas, viajes y entregas. BI consolida los tres. Cada sistema abre su propio módulo.</p></div>`;
+if(T==1){const n=k=>S.lg.filter(l=>l.s.includes(k)).length;return kp([['Conexión','Activa'],['Última actualización',(S.lg[0]||{}).t||'-'],['Sincronizadas',S.lg.length],['Pendientes',S.o.filter(o=>o.st!='Entregado').length],['Errores bloqueados',S.er]])+`<div class="card"><h3>Intercambio entre sistemas</h3><div class="fr">${Object.keys(X).map(k=>`<button class="bt" onclick="$('#xp').innerHTML=X['${k}'].map(s=>'<p>• '+s+'</p>').join('')">${k} (${n(k.slice(0,3))+n(k.slice(-3))})</button>`).join('')}</div><div id="xp"><p>Selecciona un par para ver qué información se comparte.</p></div></div><div class="card"><h3>Historial de sincronización</h3>${tb(['Fecha','Origen→Destino','Detalle','Usuario'],S.lg.filter(l=>l.s.includes('→')||l.s=='Error').map(l=>[l.t,l.s,l.m,l.u]))}</div>`}
+const st=[['ERP registra la compra',S.pc.length],['WMS crea lotes y códigos QR',S.lots.length],['ERP consulta inventario y reserva',S.o.length],['WMS prepara pedido (escaneo QR)',S.o.some(o=>o.st!='Reservado')],['TMS asigna transportista, vehículo y ruta',S.tr.length],['WMS confirma carga y despacho',S.tr.some(t=>t.st!='Programado')],['TMS sigue puntos de control e incidencias',S.ic.length],['TMS confirma entrega',S.tr.some(t=>t.st=='Entregado')],['ERP actualiza exportación e historial',S.o.some(o=>o.st=='Entregado')],['BI recibe datos de los tres sistemas',S.lg.length]];
+return`<div class="card"><button class="bt" onclick="demo()"><svg class="i" viewBox="0 0 24 24"><path d="M6 4l14 8-14 8z"/></svg> Ejecutar flujo completo</button><div class="tl" style="margin-top:14px">${st.map(s=>`<div class="${s[1]?'dn':''}"><b>${s[0]}</b> ${s[1]?B('Completo'):B('Pendiente')}</div>`).join('')}</div></div>`};
+const X={'ERP↔WMS':['ERP→WMS: compras, recepciones, reservas de pedidos','WMS→ERP: existencias, disponibilidad, salidas confirmadas'],'ERP↔TMS':['ERP→TMS: orden de exportación, destino, cantidad, Incoterm','TMS→ERP: entrega confirmada, fecha efectiva, historial del cliente'],'TMS↔WMS':['WMS→TMS: lotes, sacos, peso y carga lista','TMS→WMS: confirmación de salida, despacho y trazabilidad']};
+const cb=(id,l)=>`<div class="fr"></div>`;
+V.erp=()=>{const sel=`<select id="fc">${S.cl.filter(c=>c.on).map(c=>`<option value="${c.c}">${c.n}</option>`).join('')}</select>`;
+if(T==0)return kp([['Clientes',S.cl.length],['Compras',S.pc.length],['Pedidos',S.o.length],['Documentos emitidos',sum(S.o,o=>sum(o.docs,x=>x))]])+`<div class="card"><h3>Registrar cliente</h3><form onsubmit="event.preventDefault();S.cl.push({c:'C-'+String(S.cl.length+1).padStart(2,'0'),n:fv('cn'),p:fv('cp'),ci:fv('cc'),tp:fv('ct'),ct:fv('cx'),em:fv('ce'),on:1});LG('ERP','Cliente '+fv('cn')+' registrado');save();R()"><label>Razón social<input id="cn" required></label><label>País<input id="cp" required></label><label>Ciudad<input id="cc" required></label><label>Tipo<select id="ct"><option>Tostador</option><option>Importador</option><option>Distribuidor</option></select></label><label>Contacto<input id="cx" required></label><label>Correo<input id="ce" type="email" required></label><button class="bt">Guardar</button></form></div><div class="card">${tb(['Código','Razón social','País','Ciudad','Tipo','Contacto','Correo','Estado','Pedidos','Acciones'],S.cl.map((c,i)=>[c.c,c.n,c.p,c.ci,c.tp,c.ct,c.em,B(c.on?'Activo':'Inactivo'),S.o.filter(o=>o.c==c.c).length,`<button class="bt s" onclick="S.cl[${i}].on^=1;save();R()">${c.on?'Desactivar':'Activar'}</button> <button class="bt d" onclick="del('cl',${i})">Eliminar</button>`]))}</div>`;
+if(T==1)return socios()+`<div class="card"><h3>Registrar compra de café (ERP → WMS)</h3><form onsubmit="event.preventDefault();const l=compra(fv('ps'),fv('pn'),fv('pp'));toast('Compra enviada al WMS: lote '+l);R()"><label>Comunidad productora<select id="ps">${S.sc.map(s=>`<option>${s.n}</option>`).join('')}</select></label><label>Sacos (69 kg)<input id="pn" type="number" min="1" value="60"></label><label>Precio USD/saco<input id="pp" type="number" value="330"></label><button class="bt">Comprar y enviar al WMS</button></form></div><div class="card">${tb(['Código','Socio','Procedencia','Lote WMS','Sacos','kg','Precio USD','Total USD','Fecha','Comprobante','Estado'],S.pc.map(p=>[p.id,p.so,S.lots.find(l=>l.id==p.l).pv,p.l,p.n,p.kg,p.pr,p.n*p.pr,p.f,'CMP-'+p.id,B(p.st)]))}</div>`;
+if(T==2){const c=cost();return`<div class="card"><h3>Costos por concepto (USD)</h3>${bars(['Adquis.','Acopio','Proces.','Admin.','Almac.','Fletes','Export.','Otros'],[c.adq,c.ac,c.pr,c.ad,c.al,c.fl,c.ex,c.ot].map(Math.round),'#a8452f')}</div><div class="card">${tb(['Lote','Adquisición','Acopio+proceso','Almacenamiento','Total USD'],S.pc.map(p=>[p.l,p.n*p.pr,Math.round(p.n*p.pr*.07),Math.round(p.n*p.pr*.015),Math.round(p.n*p.pr*1.085)]))}</div>`}
+if(T==3)return tb(['Venta','Cliente','Producto','Sacos','Precio USD','Importe USD','Fecha','Incoterm','Condiciones','Estado'],S.o.map(o=>['VT-'+o.id,cli(o.c).n,'Arábica lavado',o.n,o.pr,o.n*o.pr,o.f,'FCA','30 días',B(o.st=='Entregado'?'Entregado':'Confirmado')]))+'<small>Incoterm base FCA; FOB como alternativa según condiciones documentadas.</small>';
+if(T==4)return kp([['Inventario WMS',tl(stock)],['Comprometido',tl(resv)],['Libre para exportar',tl(avail)]])+`<div class="card"><h3>Registrar pedido y reservar (máx. ${tl(avail)} sacos)</h3><form onsubmit="event.preventDefault();const o=pedido(fv('fc'),fv('fq'),fv('fr'));if(o){toast('Reservado '+o.id);R()}"><label>Cliente${sel}</label><label>Sacos<input id="fq" type="number" min="1" value="20"></label><label>Ruta<select id="fr"><option value="B">Arica</option><option value="C">Iquique</option></select></label><button class="bt">Reservar</button></form></div><div class="card">${tb(['Pedido','Cliente','Solicitado','Reservado','Lotes','Fecha estimada','Estado','Acción'],S.o.map(o=>[o.id,cli(o.c).n,o.n,o.st=='Entregado'||o.st=='En transporte'?0:o.n,Object.keys(o.lots).join(', '),o.f,B(o.st),o.st=='Reservado'?`<button class="bt" onclick="prep('${o.id}')">Preparar en WMS</button>`:'–']))}</div>`;
+if(T==5)return tb(['Exportación','Comprador','País','Puerto','Sacos','kg','Lotes','Incoterm','Fecha prevista','Transporte','Estado'],S.o.map(o=>['EX-'+o.id,cli(o.c).n,cli(o.c).p,o.r=='B'?'Arica':'Iquique',o.n,o.n*KG,Object.keys(o.lots).join(', '),'FCA',o.f,(S.tr.find(t=>t.o==o.id)||{id:'Sin viaje'}).id,B(o.st)]));
+return`<div class="card"><h3>Expediente digital por exportación</h3><p>Preparar exige las 4 primeras; despachar exige las 7.</p>${tb(['Pedido',...DOCS],S.o.map(o=>[o.id,...o.docs.map((d,i)=>`<button class="bt ${d?'ok':'d'}" onclick="doc('${o.id}',${i})">${d?'Emitido':'Pendiente'}</button>`)]))}</div>`};
+V.tms=()=>{
+if(T==0)return rutas();
+if(T==1)return tb(['Código','Empresa','Servicio','Vehículo','Capacidad (t)','Conductor','Tarifa USD','Estado','Viajes'],S.ca.map((c,i)=>['TR-0'+(i+1),c.n,c.srv,c.ve,c.cap,c.co,c.tar,B('Activo'),S.tr.filter(t=>t.ca==i).length]));
+if(T==2)return tb(['Viaje','Ruta','Salida','T. programado (opt.)','T. real','Retraso por incidentes','Diferencia'],S.tr.map(t=>{const r=sum(S.ic.filter(i=>i.r==t.r),i=>i.min);return[t.id,RT[t.r].n,t.dep||'Por confirmar',fm(tot2(t.r,2)),fm(tot2(t.r,1)),r+' min',fm(tot2(t.r,1)-tot2(t.r,2))]}));
+if(T==3)return tb(['Viaje','Transportista','Flete','Combustible','Peajes','Viáticos','Fronterizo','Total USD'],S.tr.map(t=>{const f=flete(t),c=S.ca[t.ca];return[t.id,c.n,...[f.b,f.c,f.p,f.v,f.f].map(Math.round),f.tot]}));
+if(T==4)return tb(['Viaje','Pedido','Exportación','Vehículo','Conductor','Ruta','Punto actual','Avance','Estado','Acción'],S.tr.map(t=>{const p=RT[t.r].p,c=S.ca[t.ca];return[t.id,t.o,'EX-'+t.o,c.ve,c.co,RT[t.r].n,p[t.pi][0],`<div class="pb" style="width:90px"><i style="width:${t.pi/(p.length-1)*100}%"></i></div>`,B(t.st),t.st=='Programado'?`<button class="bt" onclick="salida('${t.id}')">Confirmar salida</button>`:t.st=='En ruta'?`<button class="bt s" onclick="avz('${t.id}')">Avanzar punto</button> <button class="bt ok" onclick="entrega('${t.id}')">Confirmar entrega</button>`:S.o.find(o=>o.id==t.o).n+' sacos entregados']}));
+return`<div class="card"><h3>Registrar incidente</h3><form onsubmit="event.preventDefault();inc(fv('ir'),fv('ip'),fv('im'),fv('ic'));R()"><label>Ruta<select id="ir"><option>A</option><option>B</option><option>C</option></select></label><label>Punto<input id="ip" list="dl" required></label><datalist id="dl">${[...new Set(['A','B','C'].flatMap(r=>RT[r].p.map(p=>p[0])))].map(x=>`<option>${x}`).join('')}</datalist><label>Minutos perdidos<input id="im" type="number" value="30"></label><label>Causa<input id="ic" required></label><button class="bt">Registrar</button></form></div>`+kp([['Tiempo perdido (min)',sum(S.ic,i=>i.min)],['Abiertos',S.ic.filter(i=>i.st=='Abierto').length]])+`<div class="card">${tb(['Código','Ruta','Punto','Fecha','Min perdidos','Causa','Responsable','Acción correctiva','Estado',''],S.ic.map((i,x)=>[i.id,i.r,i.pt,i.f,i.min,i.ca,i.re,i.ac,B(i.st),`<button class="bt s" onclick="S.ic[${x}].st='Cerrado';save();R()">Cerrar</button> <button class="bt d" onclick="del('ic',${x})">Eliminar</button>`]))}</div>`};
+function rutas(){const R2=RT[rs],p=R2.p;let a=0,b=0,ra=[],oa=[];const rows=p.map((q,i)=>{a+=q[1];b+=q[2];ra.push(a);oa.push(b);return[i+1,q[0],i?fm(q[1]):'Inicio',fm(a),i?fm(q[2]):'Inicio',fm(b),i?(q[1]-q[2])+' min':'0 min',fm(a-b),hr(a),hr(b)]}),A=a,O=b;
+return`<div class="fr" style="margin-bottom:12px">${['A','B','C'].map(r=>`<button class="bt ${rs==r?'':'s'}" onclick="rs='${r}';R()">${RT[r].n}</button>`).join('')}<label>Hora de salida<input type="time" value="${dep}" onchange="dep=this.value;R()"></label></div>
+${kp([['Tiempo real',fm(A)],['Tiempo optimizado',fm(O)],['Ahorro',fm(A-O)],['Reducción',((A-O)/A*100).toFixed(1)+'%'],['Llegada real',hr(A)],['Llegada optimizada',hr(O)]])}
+
+<div class="card"><h3>Puntos de control (${p.length}) – ${R2.n}</h3>${tb(['Nº','Punto de control','Tiempo real tramo','Acumulado real','Tiempo opt. tramo','Llegada opt. acum.','Diferencia tramo','Ahorro acumulado','Hora real llegada','Hora opt. llegada'],rows)}</div>
+<div class="g2"><div class="card"><h3>Acumulado real vs optimizado</h3>${line(ra,oa)}</div><div class="card"><h3>Ahorro por punto de control (min)</h3>${bars(p.map(q=>q[0]),p.map(q=>q[1]-q[2]),'#4f7a4a')}</div><div class="card"><h3>Tiempo por tramo: real vs óptimo (min)</h3>${bars(p.map(q=>q[0]),p.map(q=>q[1]),'#a8452f')}${bars(p.map(q=>q[0]),p.map(q=>q[2]),'#4f7a4a')}</div><div class="card"><h3>Mapa</h3>${map(p)}</div></div>
+<div class="card"><h3>Tiempo acumulado por punto de control (h)</h3>${crv([{n:'Arica',v:cum('B')},{n:'Iquique',v:cum('C')}],Array.from({length:25},(_,i)=>i+1))}</div><div class="card"><h3>Comparación de las tres rutas</h3>${tb(['Ruta','Tiempo real','Tiempo optimizado','Ahorro','Reducción'],['A','B','C'].map(r=>[RT[r].n,fm(tot2(r,1)),fm(tot2(r,2)),fm(tot2(r,1)-tot2(r,2)),((tot2(r,1)-tot2(r,2))/tot2(r,1)*100).toFixed(1)+'%']))}</div>`}
+V.wms=()=>{
+if(T==0)return kp([['Lotes',S.lots.length],['Sacos ingresados',sum(S.mv.filter(m=>m.tp=='Ingreso'),m=>m.q)],['Sacos en stock',tl(stock)],['Peso (kg)',tl(stock)*KG],['Pedidos preparados',S.o.filter(o=>o.st=='Preparado').length]])+tb(['Lote','Códigos de saco','Productor','Ingreso','Cantidad','kg','Calidad','Humedad %','Ubicación','Estado'],S.lots.map(l=>[l.id,l.id+'-S001 … S'+String(l.n).padStart(3,'0'),l.so,l.f,stock(l),stock(l)*KG,l.q,l.hu,l.loc,l.bl?B('Bloqueado'):B('Aprobado')]));
+if(T==1)return`<div class="card"><h3>Registrar movimiento</h3><form onsubmit="event.preventDefault();const l=S.lots.find(x=>x.id==fv('ml')),t=fv('mt');if(t=='Bloqueo')l.bl=1;if(t=='Liberación')l.bl=0;if(t=='Traslado'||t=='Reubicación'){if(!fv('md'))return bad('Indique la ubicación destino');var o=l.loc;l.loc=fv('md')}S.mv.push({h:nw(),tp:t,l:l.id,q:0,o:o||l.loc,d:fv('md')||l.loc,u:S.us[S.cu].n});LG('WMS',t+' '+l.id);save();R()"><label>Lote<select id="ml">${S.lots.map(l=>`<option>${l.id}`).join('')}</select></label><label>Tipo<select id="mt"><option>Traslado</option><option>Reubicación</option><option>Bloqueo</option><option>Liberación</option></select></label><label>Destino<input id="md" placeholder="B-02"></label><button class="bt">Registrar</button></form></div><div class="card">${tb(['Fecha y hora','Tipo','Lote','Sacos','Registro','Destino','Responsable'],S.mv.map(m=>[m.h,m.tp,m.l,m.q,m.o,m.d,m.u]))}</div>`;
+if(T==2)return tb(['Pedido','Cliente','Exportación','Lotes','Sacos','kg','Documentos','Estado','Acción'],S.o.map(o=>[o.id,cli(o.c).n,'EX-'+o.id,Object.keys(o.lots).join(', '),o.n,o.n*KG,o.docs.filter(x=>x).length+'/7',B(o.st),o.st=='Reservado'?`<button class="bt" onclick="prep('${o.id}')">Escanear y preparar</button>`:'–']));
+if(T==3)return tb(['Lote','Inicial','Entradas','Salidas','Actual','Disponible','Reservado','Bloqueado','Aprobado','Observado','Rechazado'],S.lots.map(l=>[l.id,0,mvq(l.id,'Ingreso'),mvq(l.id,'Salida'),stock(l),avail(l),resv(l),l.bl?stock(l):0,l.bl?0:stock(l),0,0]))+'<small>Saldos calculados a partir de los movimientos.</small>';
+return`<div class="card"><h3>Generar, escanear y consultar QR de sacos</h3><div class="fr"><label>Lote<select id="ql">${S.lots.map(l=>`<option>${l.id}`).join('')}</select></label><label>Saco Nº<input id="qn" type="number" min="1" value="1" style="width:80px"></label><button class="bt" onclick="qrShow(fv('ql')+'-S'+String(fv('qn')).padStart(3,'0'))">Generar QR</button><label>Código manual<input id="qm" placeholder="L-2601-S055"></label><button class="bt s" onclick="qrShow(fv('qm'))">Consultar</button><button class="bt s" onclick="cam()"><svg class="i" viewBox="0 0 24 24"><path d="M3 8h4l2-3h6l2 3h4v11H3zM12 17a4 4 0 100-8 4 4 0 000 8"/></svg> Escanear con cámara</button><button class="bt s" onclick="print()">Imprimir etiqueta</button></div><video id="cv" hidden style="width:260px;margin-top:8px"></video><div id="qo"><p>Genera un QR o ingresa un código para ver la trazabilidad completa del saco.</p></div></div><div class="card"><h3>Códigos recientes</h3><div class="fr">${S.lots.slice(-15).map(l=>`<button class="bt s x" onclick="qrShow('${l.id}-S001')">${l.id}-S001</button>`).join('')}</div></div>`};
+function qrShow(code){code=String(code).trim().toUpperCase();const m=code.match(/^(L-\d+)-S(\d+)$/),l=m&&S.lots.find(x=>x.id==m[1]),n=m&&+m[2];if(!l||n<1||n>l.n){$('#qo').innerHTML='<p class="er">Código no válido o saco inexistente. Formato: L-2601-S001.</p>';return}
+const o=S.o.find(o=>o.lots[l.id]&&n>=o.lots[l.id][0]&&n<o.lots[l.id][0]+o.lots[l.id][1]),t=o&&S.tr.find(t=>t.o==o.id),cd=l.id+'-S'+String(n).padStart(3,'0');
+$('#qo').innerHTML=`<div class="lab" id="lab"><div id="qrbox"></div><div><b>ANPROCA</b><br><b>${cd}</b><br>Lote ${l.id} · ${KG} kg<br>${l.pv} · ${l.f}</div></div><div class="g2"><div class="card"><h3>Ficha del saco</h3><p>Productor: ${l.so}<br>Procedencia: ${l.pv}<br>Recepción: ${l.f}<br>Peso: ${KG} kg · Calidad ${l.q} · Humedad ${l.hu}%<br>Ubicación: ${l.loc}<br>Pedido: ${o?o.id+' '+B(o.st):'Sin pedido (en stock)'}<br>Viaje: ${t?t.id+' '+B(t.st):'–'}<br>Entrega: ${t&&t.ent?t.ent:'Pendiente'}</p></div><div class="card"><h3>Historial del lote</h3>${S.mv.filter(m=>m.l==l.id).map(m=>`<p>${m.h} · ${m.tp} ${m.q?m.q+' sacos':''} → ${m.d}</p>`).join('')}</div></div>`;
+if(window.QRCode)new QRCode($('#qrbox'),{text:cd,width:96,height:96});else $('#qrbox').textContent='[QR]';LG('WMS','Consulta QR '+cd);save()}
+
+V.admin=()=>{if(T==3)return instr();
+if(T==0)return`<div class="card"><h3>Registrar trabajador / usuario</h3><form onsubmit="event.preventDefault();S.us.push({c:fv('uc'),n:fv('un'),cg:fv('ug'),ar:fv('ua'),u:fv('uu'),ro:fv('ur'),on:1,f:fv('uf'),ph:(fv('up')&&fv('up')!='anproca2026')?hp(fv('uu'),fv('up')):''});LG('Admin','Usuario '+fv('uu')+' registrado');save();R()"><label>Código<input id="uc" value="T-0${S.us.length+1}" required></label><label>Nombre completo<input id="un" required></label><label>Cargo<input id="ug" required></label><label>Área<input id="ua" required></label><label>Usuario<input id="uu" required></label><label>Contraseña<input id="up" type="password" value="anproca2026" autocomplete="new-password"></label><label>Rol<select id="ur">${Object.keys(P).map(r=>`<option>${r}`).join('')}</select></label><label>Fecha<input id="uf" type="date" value="${new Date().toISOString().slice(0,10)}"></label><button class="bt">Registrar</button></form></div><div class="card">${tb(['Código','Nombre','Cargo','Área','Usuario','Rol','Estado','Registro','Acciones'],S.us.map((u,i)=>[u.c,u.n,u.cg,u.ar,u.u,u.ro,B(u.on?'Activo':'Inactivo'),u.f,`<button class="bt s" onclick="askP('Nombre completo',S.us[${i}].n,n=>{S.us[${i}].n=n;save();R()})">Editar</button> <button class="bt s" onclick="pwSet(${i})">Clave</button> <button class="bt s" onclick="S.us[${i}].on^=1;LG('Admin','Estado de usuario cambiado');save();R()">${u.on?'Desactivar':'Activar'}</button>`]))}</div>`;
+if(T==1)return`<div class="card">${tb(['Fecha y hora','Usuario','Sistema','Operación'],S.lg.map(l=>[l.t,l.u,l.s,l.m]))}</div>`;
+return`<div class="card"><h3>Configuración y alcance</h3><p><b>Funciona en este equipo:</b> formularios, validaciones, integración ERP↔WMS↔TMS, QR, cálculos, gráficos, exportación CSV, impresión y persistencia en localStorage de este equipo.</p><p><b>Requeriría servidor y base de datos:</b> multiusuario real, contraseñas cifradas, permisos del lado servidor, sincronización entre dispositivos y escaneo continuo de QR en todos los navegadores.</p><h4 style="margin:14px 0 6px">Respaldo de datos</h4><p><small>Los datos viven en este navegador. Descargue un respaldo con frecuencia y restáurelo en cualquier equipo.</small></p><button class="bt" onclick="bkDown()">Descargar respaldo (.json)</button><label class="bt o" style="cursor:pointer">Restaurar respaldo<input type="file" accept=".json,application/json" hidden onchange="bkUp(this)"></label> <button class="bt o" onclick="autoRest()">Restaurar copia automática</button> <button class="bt d" onclick="askC('¿Restablecer todos los datos? Se perderán los cambios hechos.',()=>{S=seed();save();go('inicio')},'Restablecer')">Restablecer datos</button></div>`};
+
+const acc=()=>{const u=S.us[S.cu];return`<div class="ig" style="margin-bottom:14px">${[['ERP','Compras, clientes, ventas y exportaciones','erp'],['TMS','Rutas, viajes y entregas','tms'],['WMS','Inventario, lotes y QR','wms'],['Inteligencia de Negocios','13 indicadores consolidados','bi']].map(a=>`<div class="card" style="cursor:pointer" onclick="go('${a[2]}')"><h3>${a[0]}</h3><small>${a[1]}</small></div>`).join('')}<div class="card" style="cursor:pointer" onclick="go('sist',1)"><h3>Centro de integración</h3><small>${S.lg.length} operaciones sincronizadas</small></div><div class="card"><h3>${u.n}</h3><small>${u.cg} · ${u.ro}</small></div><div class="card"><h3>Actividad reciente</h3>${S.lg.slice(0,3).map(l=>`<small>${l.t} · ${l.s}: ${l.m}</small><br>`).join('')}</div></div>`};
+const mes=()=>{const ms=[...new Set([...S.pc.map(p=>p.f.slice(0,7)),...S.o.map(o=>o.f.slice(0,7))])].sort();return{ms,a:ms.map(m=>sum(S.pc.filter(p=>p.f.slice(0,7)==m),p=>p.kg)),p:ms.map(m=>sum(S.o.filter(o=>o.f.slice(0,7)==m),o=>o.n*KG))}};
+const cum=r=>{let a=0;return RT[r].p.map(q=>+((a+=q[1])/60).toFixed(1))};
+const VI='Estrategia de mejora de la cadena de suministro mediante Inteligencia de Negocios',VD='Desempeño de exportación del café arábica de ANPROCA',DG='Gestión de la cadena de suministro',DB='Inteligencia de Negocios',DE='Desempeño de exportación';
+const IND=[[1,'Nivel de cumplimiento de las actividades de acopio y procesamiento programadas',VI,DG+' · Producción','ERP'],[2,'Nivel de cumplimiento de los tiempos de traslado por tramo',VI,DG+' · Transporte y logística','TMS'],[3,'Nivel de coordinación entre las áreas para programar los despachos',VI,DG+' · Distribución','Centro de integración'],[4,'Nivel de cumplimiento de la identificación y organización de los lotes almacenados',VI,DG+' · Almacenamiento','WMS'],[5,'Nivel de facilidad para transferir información entre áreas',VI,DB+' · Gestión de la información','Centro de integración'],[6,'Nivel de posibilidad de sistematización de los procesos',VI,DB+' · Sistematización de la información','Centro de integración'],[7,'Nivel de necesidad de capacitación del personal',VI,DB+' · Capacitación','Administración'],[8,'Nivel de cumplimiento de los plazos de entrega pactados (OTD)',VD,DE+' · Cumplimiento de tiempos','TMS'],[9,'Nivel de coincidencia entre el inventario físico y el registrado',VD,DE+' · Gestión de inventarios','WMS'],[10,'Nivel de cumplimiento de los pedidos registrados',VD,DE+' · Nivel de servicio','WMS'],[11,'Nivel de rapidez de respuesta ante incidencias',VD,DE+' · Tiempo de respuesta','TMS'],[12,'Frecuencia de incidencias durante las operaciones de exportación: baja, media o alta',VD,DE+' · Control de las operaciones','TMS'],[13,'Nivel de aplicación de acciones correctivas ante incidencias',VD,DE+' · Seguimiento y mejora continua','Centro de integración']];
+const AN=[1,0,0,1,0,0,2,1,1,1,0,2,0],DS=[2,1,2,2,2,1,1,2,2,2,2,0,2],IM={erp:[1],tms:[2,8,11,12],wms:[4,9,10],sist:[3,5,6,13],admin:[7]};
+const lv=(n,i)=>(n==12?['Baja','Media','Alta']:['Bajo','Medio','Alto'])[i],qs=(n,i)=>(n==7||n==12?2-i:i)+1;
+const apo=n=>{const e=S.o.filter(o=>o.st=='Entregado').length;return[`${S.lots.length} lotes acopiados y procesados`,'Reducción de tiempo en rutas: −'+((1-(tot2('A',2)+tot2('B',2)+tot2('C',2))/(tot2('A',1)+tot2('B',1)+tot2('C',1)))*100).toFixed(1)+'% de tiempo',`${S.o.filter(o=>o.st!='Reservado').length}/${S.o.length} pedidos con despacho coordinado`,`${S.lots.filter(l=>l.loc).length}/${S.lots.length} lotes con ubicación y QR`,`${S.lg.length} registros compartidos`,'ERP + TMS + WMS conectados',`${S.us.length} usuarios con rol`,`${e} entregas registradas`,`${S.lots.length} lotes con saldo calculado por movimientos`,`${e}/${S.o.length} pedidos entregados`,`${S.ic.filter(i=>i.st=='Cerrado').length}/${S.ic.length} incidencias cerradas`,`${S.ic.length} incidencias registradas`,`${S.ic.filter(i=>i.ac).length}/${S.ic.length} con acción correctiva`][n-1]};
+const ip=m=>IM[m]?`<div class="card"><h3>Indicadores de este sistema</h3><div class="ig">${IM[m].map(n=>`<div class="card" style="cursor:pointer" onclick="go('bi',3)"><b>${n}. ${IND[n-1][1]}</b><p><small>${IND[n-1][3]}<br>Apoyo: ${apo(n)}</small></p>${lv(n,AN[n-1])} → <b>${lv(n,DS[n-1])}</b></div>`).join('')}</div></div>`:'';
+
+const INS=['Cuestionario estructurado','Ficha de tiempos de traslado','Guía de observación','Ficha de pedidos y entregas','Ficha de incidencias','Formulario de entrevista','Registro de acciones correctivas'];
+function instr(){if(!S.ins||!S.ins.length)S.ins=IN.map((m,n)=>({f:'2026-10-'+String(1+n).padStart(2,'0'),i:m[5],n:n+1,v:LV(n)[DS[n]],o:'Aplicado en '+S.sc[n].n+' ('+S.sc[n].zo+')',u:S.us[n%3].n})).concat([0,11].map(k=>({f:'2026-10-20',i:IN[k][5],n:k+1,v:LV(k)[DS[k]],o:'Segunda aplicación en '+S.sc[12+k%2].n,u:S.us[2].n})));
+return`<div class="card"><h3>Registrar instrumento</h3><form onsubmit="event.preventDefault();S.ins.push({f:nw(),i:fv('ni'),n:fv('nn'),v:fv('nl'),o:fv('no'),u:S.us[S.cu].n});LG('Instrumentos',fv('ni')+' → indicador '+fv('nn'));save();R()"><label>Instrumento<select id="ni">${INS.map(x=>`<option>${x}`).join('')}</select></label><label>Indicador<select id="nn">${IND.map(i=>`<option value="${i[0]}">${i[0]}. ${i[1].slice(0,45)}…`).join('')}</select></label><label>Nivel ordinal<select id="nl"><option>Bajo</option><option>Medio</option><option>Alto</option></select></label><label>Observación<input id="no"></label><button class="bt">Guardar</button></form></div><div class="card">${tb(['Fecha','Instrumento','Indicador Nº','Nivel','Observación','Responsable','Registro'],S.ins.map(x=>[x.f,x.i,x.n,x.v,x.o,x.u,'Registrado']))}</div>`}
+$('#wu').textContent=S.us[S.cu].n;
+
+/* ===== FUSIÓN: iconos, adaptadores de gráficos, héroe ===== */
+const IC={home:'M3 11l9-8 9 8M5 10v10h14V10',erp:'M4 21V5l8-3 8 3v16M9 9h2M13 9h2M9 13h2M13 13h2M10 21v-4h4v4',truck:'M2 6h12v10H2zM14 9h4l3 3v4h-7M4 18a2 2 0 104 0 2 2 0 10-4 0M15 18a2 2 0 104 0 2 2 0 10-4 0',box:'M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10',chart:'M4 20V10M10 20V4M16 20v-8M22 20H2',users:'M16 19v-1a4 4 0 00-4-4H8a4 4 0 00-4 4v1M10 11a3 3 0 100-6 3 3 0 000 6M20 19v-1a3 3 0 00-2-2.8M16 5.2a3 3 0 010 5.6',chain:'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',puzzle:'M10 4a2 2 0 114 0v2h4v4h-2a2 2 0 100 4h2v4h-4v-2a2 2 0 10-4 0v2H6v-4h2a2 2 0 100-4H6V6h4z',alert:'M12 3l10 18H2zM12 10v5M12 18v.01',doc:'M6 2h9l5 5v15H6zM14 2v6h6M9 13h8M9 17h8',check:'M5 13l4 4L19 7'};
+const ic=n=>`<svg class="i" viewBox="0 0 24 24"><path d="${IC[n]}"/></svg>`;
+let CF=[];const ch=(cfg,h=210)=>(CF.push(cfg),`<canvas data-c="${CF.length-1}" style="height:${h}px"></canvas>`);
+const CM={'#b5763a':'#d9a85f','#6f4a30':'#b87b45','#c99a2e':'#e6c06a','#a8452f':'#c2553a','#4f7a4a':'#8fae62'};
+function bars(l,v,col='#b5763a'){return ch({t:'bar',l:l.map(x=>String(x).slice(0,10)),s:[{n:'',v,c:CM[col]||col}]},210)}
+function line(a,b){const n=a.length,l=a.map((_,i)=>i+1);return ch({t:'line',l,s:[{n:'Real '+fm(a[n-1]),v:a.map(x=>+(x/60).toFixed(1)),c:'#c2553a'},{n:'Optimizado '+fm(b[n-1]),v:b.map(x=>+(x/60).toFixed(1)),c:'#8fae62'}]},230)}
+function map(p){return ch({t:'route',l:p.map(q=>q[0]),s:[{v:[0]}]},150)+'<small>Esquema referencial de puntos de control, no a escala.</small>'}
+function crv(s,labs,w,h,fill){return ch({t:fill?'area':'line',l:labs.map(String),s:s.map(x=>({n:x.n,v:x.v}))},230)}
+const fun=()=>{const E=['Pendiente','En preparación','En tránsito','Entregado'],st=['Reservado','Preparado','En transporte','Entregado'],col=['#7a4b27','#b87b45','#d9a85f','#8fae62'];return E.map((e,i)=>`<div class="fun" style="width:${100-i*10}%;background:${col[i]};${i>1?'color:#26150b':''}">${e} · ${S.o.filter(o=>o.st==st[i]).length}</div>`).join('')};
+const hero=u=>`<div class="hero"><canvas class="beans"></canvas><div><span class="sg">Café arábica de altura · Caranavi, La Paz · Bolivia</span><h1>Asociación Nacional de Productores de Café</h1><p><b style="color:var(--g)">ANPROCA</b> · Plataforma integrada ERP, TMS, WMS e Inteligencia de Negocios para mejorar la cadena de suministro y el desempeño de exportación del café arábica. Sesión: <b>${u.n}</b> (${u.ro}).</p><div class="st"><div><b data-n="13">0</b><span>indicadores oficiales</span></div><div><b data-n="4">0</b><span>sistemas integrados</span></div><div><b data-n="${tl(avail)}">0</b><span>sacos disponibles</span></div><div><b data-n="${S.lg.length}">0</b><span>operaciones sincronizadas</span></div></div><a class="bt" onclick="go('bi',2)">Abrir panel ejecutivo</a><a class="bt o" onclick="go('bi',3)">Ver los 13 indicadores</a></div></div>`;
+function tabsBar(){const m=MENU.find(x=>x[0]==M);return M=='cadena'||!m[3].length?'':`<div class="tabs">${m[3].map((s,i)=>`<a class="${T==i?'on':''}" onclick="go('${M}',${i})">${s}</a>`).join('')}</div>`}
+const today=()=>new Date().toISOString().slice(0,10);
+
+
+const C=['#b87b45','#d9a85f','#6b4429','#8a9a5b','#c2553a','#3b2415'],MES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'],RM=matchMedia('(prefers-reduced-motion:reduce)').matches;
+let sd=7;const RN=()=>(sd=sd*16807%2147483647)/2147483647,cl=v=>Math.max(5,Math.min(98,Math.round(v)));
+const ser=(n,a,b,j)=>Array.from({length:n},(_,i)=>cl(a+(b-a)*i/Math.max(n-1,1)+(RN()-.5)*j));
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting&&!e.target._d){e.target._d=1;play(e.target)}}),{rootMargin:'120px'});
+function mk(cfg,h=180){const c=document.createElement('canvas');c.style.cssText='width:100%;height:'+h+'px';c._c=cfg;c.onmouseenter=()=>play(c);io.observe(c);return c}
+function play(c){cancelAnimationFrame(c._r);const lp=()=>c._c&&(c._c.t=='route'||c._c.t=='flow'),t0=performance.now(),f=t=>{if(!c.isConnected&&lp())return;const p=Math.min(1,(t-t0)/(RM?1:1000));draw(c,lp()?1:1-Math.pow(1-p,3));if(p<1||(lp()&&!RM))c._r=requestAnimationFrame(f)};c._r=requestAnimationFrame(f)}
+function draw(c,p){const k=c._c,d=devicePixelRatio||1,w=c.clientWidth,h=c.clientHeight;if(!w)return;if(c.width!=Math.round(w*d)){c.width=Math.round(w*d);c.height=Math.round(h*d)}
+const x=c.getContext('2d');x.setTransform(d,0,0,d,0,0);x.clearRect(0,0,w,h);x.textAlign='left';x.font='10px Manrope,sans-serif';
+const S=k.s,L=k.l||[],T=k.t,V=S.flatMap(s=>s.v),mx=k.max||Math.max(...V)*1.12||1,col=i=>S[i].c||C[i%6],ink=document.body.classList.contains('lt')?'#5a3d28':'#e9d6b8',tx=document.body.classList.contains('lt')?'#3b2415':'#f6ead6';
+if(T=='route'){const n=L.length,X=i=>20+i*(w-40)/Math.max(n-1,1),Y=i=>h/2+Math.sin(i*.8)*h*.26,tm=performance.now()/1000;x.strokeStyle='#6b4429';x.lineWidth=3;x.setLineDash([7,4]);x.beginPath();L.forEach((_,i)=>x[i?'lineTo':'moveTo'](X(i),Y(i)));x.stroke();x.setLineDash([]);L.forEach((q,i)=>{x.fillStyle=i==0?'#8fae62':i==n-1?'#c2553a':'#b87b45';x.beginPath();x.arc(X(i),Y(i),i%(n-1)?3.5:7,0,6.3);x.fill()});const q=(tm*.07%1)*(n-1),i=Math.min(n-2,Math.floor(q)),f=q-i,px=X(i)+(X(i+1)-X(i))*f,py=Y(i)+(Y(i+1)-Y(i))*f,g=x.createRadialGradient(px,py,0,px,py,22);g.addColorStop(0,'#d9a85f');g.addColorStop(1,'#d9a85f00');x.fillStyle=g;x.beginPath();x.arc(px,py,22,0,6.3);x.fill();x.fillStyle='#fff';x.beginPath();x.arc(px,py,4,0,6.3);x.fill();x.fillStyle='#e9d6b8';x.textAlign='left';x.fillText(L[0],8,14);x.textAlign='right';x.fillText(L[n-1],w-8,h-6);return}
+if(T=='flow'){const N=k.n,tm=performance.now()/1000;k.e.forEach(e=>{const a=N[e[0]],b2=N[e[1]];x.strokeStyle='#6b4429';x.lineWidth=2;x.beginPath();x.moveTo(a[1]*w,a[2]*h);x.lineTo(b2[1]*w,b2[2]*h);x.stroke();for(let i=0;i<4;i++){const q=(tm*.3+i/4)%1;x.fillStyle='#d9a85f';x.beginPath();x.arc(a[1]*w+(b2[1]-a[1])*w*q,a[2]*h+(b2[2]-a[2])*h*q,3.5,0,6.3);x.fill()}});N.forEach((n,i)=>{const X=n[1]*w,Y=n[2]*h;x.fillStyle=i==N.length-1?'#d9a85f':'#4a2c18';x.strokeStyle='#d9a85f';x.lineWidth=2;x.beginPath();x.arc(X,Y,36+Math.sin(tm*3+i)*2,0,6.3);x.fill();x.stroke();x.fillStyle=i==N.length-1?'#26150b':'#f6ead6';x.font='700 12px Manrope';x.textAlign='center';x.fillText(n[0].length>8?'BI':n[0],X,Y+4)});return}
+if(T=='donut'){const v=S[0].v,tot=v.reduce((a,b)=>a+b,0),r=Math.min(w*.5,h)/2-6,cx=r+10,cy=h/2;let a=-1.571;v.forEach((q,i)=>{const e=a+q/tot*6.283*p;x.beginPath();x.arc(cx,cy,r,a,e);x.arc(cx,cy,r*.6,e,a,true);x.fillStyle=C[i%6];x.fill();a=e;x.fillStyle=ink;x.fillText('■ '+L[i]+' '+q,cx+r+14,cy-v.length*7+i*14+4)});x.fillStyle=tx;x.font='700 15px Cormorant Garamond,serif';x.textAlign='center';x.fillText(k.c||'',cx,cy+5);return}
+if(T=='gauge'){const v=S[0].v[0]/100,r=Math.min(w/2,h)-14,cx=w/2,cy=h-12;x.lineWidth=12;x.lineCap='round';x.strokeStyle=1?'#5a3d28':'#eadcc6';x.beginPath();x.arc(cx,cy,r,Math.PI,6.283);x.stroke();x.strokeStyle=v>.75?'#8fae62':v>.5?'#d9a85f':'#c2553a';x.beginPath();x.arc(cx,cy,r,Math.PI,Math.PI+Math.PI*v*p);x.stroke();x.fillStyle=tx;x.font='700 22px Cormorant Garamond,serif';x.textAlign='center';x.fillText(Math.round(v*100*p)+'%',cx,cy-6);return}
+if(T=='radar'){const n=L.length,cx=w/2,cy=h/2+4,r=Math.min(w,h)/2-24;x.strokeStyle=1?'#5a3d28':'#e3d3ba';for(let g=1;g<=4;g++){x.beginPath();for(let i=0;i<=n;i++){const a=i%n/n*6.283-1.571;x[i?'lineTo':'moveTo'](cx+Math.cos(a)*r*g/4,cy+Math.sin(a)*r*g/4)}x.stroke()}
+L.forEach((l,i)=>{const a=i/n*6.283-1.571;x.fillStyle=ink;x.textAlign='center';x.fillText(l,cx+Math.cos(a)*(r+13),cy+Math.sin(a)*(r+13)+3)});
+S.forEach((s,j)=>{x.beginPath();s.v.forEach((v,i)=>{const a=i/n*6.283-1.571;x[i?'lineTo':'moveTo'](cx+Math.cos(a)*r*v/mx*p,cy+Math.sin(a)*r*v/mx*p)});x.closePath();x.fillStyle=col(j)+'38';x.fill();x.strokeStyle=col(j);x.lineWidth=2;x.stroke()});
+if(S.length>1)S.forEach((s,j)=>{x.fillStyle=col(j);x.textAlign='left';x.fillText('■ '+s.n,4+j*70,10)});return}
+if(T=='hbar'){const n=L.length,rh=(h-6)/n;L.forEach((l,i)=>{const y=3+i*rh,bw=(w-140)*S[0].v[i]/mx*p;x.fillStyle=ink;x.textAlign='right';x.fillText(l,92,y+rh/2+3);x.fillStyle=C[i%6];x.fillRect(98,y+3,bw,rh-8);x.textAlign='left';x.fillText(S[0].v[i],102+bw,y+rh/2+3)});return}
+const l=30,b=20,t=16,r=8,H=h-b-t,W=w-l-r,n=S[0].v.length;x.strokeStyle=1?'#5a3d28':'#eadcc6';x.fillStyle=1?'#b9a285':'#9a7b5c';x.textAlign='right';
+for(let g=0;g<=4;g++){const y=t+H-H*g/4;x.beginPath();x.moveTo(l,y);x.lineTo(w-r,y);x.stroke();x.fillText(Math.round(mx*g/4),l-4,y+3)}
+x.textAlign='center';const st=Math.ceil(n/8);L.forEach((s,i)=>{if(i%st==0)x.fillText(s,T=='bar'?l+W*(i+.5)/n:l+W*i/Math.max(n-1,1),h-6)});
+if(T=='bar'){const m=S.length,gw=W/n,bw=gw*.72/m;S.forEach((s,j)=>{x.fillStyle=col(j);s.v.forEach((v,i)=>{const bh=H*v/mx*p;x.fillRect(l+gw*i+gw*.14+bw*j,t+H-bh,bw-1,bh)})})}
+else S.forEach((s,j)=>{const X=i=>l+W*i/Math.max(n-1,1),Y=v=>t+H-H*v/mx*p;x.beginPath();s.v.forEach((v,i)=>x[i?'lineTo':'moveTo'](X(i),Y(v)));x.strokeStyle=col(j);x.lineWidth=2.4;x.lineJoin='round';x.stroke();if(T=='area'){x.lineTo(X(n-1),t+H);x.lineTo(X(0),t+H);x.fillStyle=col(j)+'33';x.fill()}s.v.forEach((v,i)=>{x.beginPath();x.arc(X(i),Y(v),2.6,0,6.3);x.fillStyle=1?'#2a1a11':'#fff';x.fill();x.stroke()})});
+if(S.length>1)S.forEach((s,j)=>{x.fillStyle=col(j);x.textAlign='left';x.fillText('■ '+s.n,l+j*84,9)})}
+const cd=(t,cfg,h,sub)=>{const d=document.createElement('div');d.className='cd';d.innerHTML=`<h4>${t}</h4>${sub?`<small>${sub}</small>`:''}`;d.append(mk(cfg,h));return d};
+const add=(id,...n)=>$(id).append(...n);
+
+/* Contadores */
+const co=new IntersectionObserver(es=>es.forEach(e=>{if(!e.isIntersecting)return;co.unobserve(e.target);const n=+e.target.dataset.n,t0=performance.now(),f=t=>{const p=Math.min(1,(t-t0)/1600);e.target.textContent=Math.round(n*(1-Math.pow(1-p,3)));if(p<1)requestAnimationFrame(f)};requestAnimationFrame(f)}));
+document.querySelectorAll('[data-n]').forEach(e=>co.observe(e));
+
+/* 7.1 Fuentes + flujo */
+const SR=[['ERP','Compras y proveedores',412],['ERP','Producción y acopio',386],['ERP','Pedidos y clientes',274],['ERP','Exportaciones',138],['TMS','Rutas y tramos',226],['TMS','Entregas',191],['TMS','Incidencias',97],['WMS','Inventarios',540],['WMS','Lotes y QR',468],['WMS','Movimientos',905],['Lab','Catación y calidad',163],['Adm','Usuarios y permisos',24],['ERP','Comunidades productoras',14],['ERP','Clientes internacionales',12],['TMS','Transportistas',15]];
+SR.forEach(s=>add('#src',Object.assign(document.createElement('div'),{className:'cd',innerHTML:`<small><span class="pl"></span>${s[0]} · sincronizado</small><h4>${s[1]}</h4><b style="font:700 34px 'Cormorant Garamond';color:var(--g)" data-n="${s[2]}">0</b> <small>registros</small>`})));
+document.querySelectorAll('#src [data-n]').forEach(e=>co.observe(e));
+(()=>{const c=$('#flow'),x=c.getContext('2d');const N=[['ERP',.1,.2],['TMS',.1,.5],['WMS',.1,.8],['Base de datos',.5,.5],['Inteligencia de Negocios',.88,.5]],E=[[0,3],[1,3],[2,3],[3,4]];let t=0;
+(function f(){const w=c.clientWidth,h=c.clientHeight;if(c.width!=w*2){c.width=w*2;c.height=h*2}x.setTransform(2,0,0,2,0,0);x.clearRect(0,0,w,h);t+=.006;
+E.forEach(e=>{const a=N[e[0]],b=N[e[1]];x.strokeStyle='#6b4429';x.lineWidth=2;x.beginPath();x.moveTo(a[1]*w,a[2]*h);x.lineTo(b[1]*w,b[2]*h);x.stroke();for(let i=0;i<5;i++){const q=(t+i/5)%1;x.fillStyle='#d9a85f';x.beginPath();x.arc(a[1]*w+(b[1]-a[1])*w*q,a[2]*h+(b[2]-a[2])*h*q,4,0,6.3);x.fill()}});
+N.forEach((n,i)=>{const X=n[1]*w,Y=n[2]*h,r=i>2?46:34;x.fillStyle=i==4?'#d9a85f':'#4a2c18';x.strokeStyle='#d9a85f';x.beginPath();x.arc(X,Y,r+Math.sin(t*8+i)*2,0,6.3);x.fill();x.stroke();x.fillStyle=i==4?'#26150b':'#f6ead6';x.font='700 11px Manrope';x.textAlign='center';x.fillText(n[0].length>12?'BI':n[0],X,Y+4);if(i>2){x.fillStyle='#c9b08c';x.fillText(n[0],X,Y+r+18)}});requestAnimationFrame(f)})()})();
+
+/* 7.2 Base de datos */
+const TP=['Compra','Acopio','Lote','Movimiento','Pedido','Ruta','Entrega','Incidencia','Exportación','Inventario'],SY={Compra:'ERP',Acopio:'ERP',Pedido:'ERP',Exportación:'ERP',Ruta:'TMS',Entrega:'TMS',Incidencia:'TMS',Lote:'WMS',Movimiento:'WMS',Inventario:'WMS'},RSP=['Félix Chuquimia Nina','Abednego Alipaz Mamani','Lizeth Marca'],ES=['Registrado','En proceso','Cerrado'];
+const DBX=Array.from({length:240},(_,i)=>{const t=TP[Math.floor(RN()*10)];return{id:t.slice(0,3).toUpperCase()+'-'+String(1000+i),s:SY[t],t,f:`2026-${String(1+Math.floor(RN()*11)).padStart(2,'0')}-${String(1+Math.floor(RN()*28)).padStart(2,'0')}`,r:RSP[Math.floor(RN()*3)],d:`${t} de café arábica · ${Math.floor(10+RN()*90)} sacos`,e:ES[Math.floor(RN()*3)]}});
+TP.forEach(t=>$('#ft').add(new Option(t)));
+const rb=()=>{const q=$('#q').value.toLowerCase(),a=$('#fs').value,b=$('#ft').value,r=DBA().filter(x=>(!a||x.s==a)&&(!b||x.t==b)&&(!q||Object.values(x).join(' ').toLowerCase().includes(q)));$('#tb').innerHTML=r.slice(0,80).map(x=>`<tr><td>${x.id}</td><td>${x.s}</td><td>${x.t}</td><td>${x.f}</td><td>${x.r}</td><td>${x.d}</td><td><span class="bd b${ES.indexOf(x.e)}">${x.e}</span></td></tr>`).join('');$('#tc').textContent=`${r.length} registros encontrados de ${DBA().length} (se muestran 80)`};
+['q','fs','ft'].forEach(i=>$('#'+i).oninput=rb);rb();
+function bdcr(){$('#bdc').innerHTML='';add('#bdc',cd('Registros por tipo',{t:'hbar',l:TP,s:[{v:TP.map(t=>DBA().filter(x=>x.t==t).length)}]},300),cd('Registros por mes (2026)',{t:'area',l:MES.slice(0,11),s:[{n:'Registros',v:MES.slice(0,11).map((m,i)=>DBA().filter(x=>+x.f.slice(5,7)==i+1).length)}]},300),cd('Por sistema',{t:'donut',l:['ERP','TMS','WMS'],c:'3',s:[{v:['ERP','TMS','WMS'].map(s=>DBA().filter(x=>x.s==s).length)}]},300),cd('Estado de los registros',{t:'donut',l:ES,c:'Estado',s:[{v:ES.map(e=>DBA().filter(x=>x.e==e).length)}]},300));}bdcr();
+
+/* 13 indicadores */
+
+const TEC=i=>/Cuestionario/.test(i)?'Encuesta':/observación/.test(i)?'Observación':/entrevista/.test(i)?'Entrevista':'Análisis documental';
+const IN=[
+['Producción','Nivel de cumplimiento de las actividades de acopio y procesamiento programadas',0,DG+' · Producción','Nivel de cumplimiento','Ficha de acopio y procesamiento','ERP','Producción y acopio'],
+['Transporte y logística','Nivel de cumplimiento de los tiempos de traslado por tramo',0,DG+' · Transporte y logística','Nivel de cumplimiento','Ficha de tiempos de traslado','TMS','Rutas y tramos'],
+['Distribución','Nivel de coordinación entre las áreas para programar los despachos',0,DG+' · Distribución','Nivel de coordinación','Guía de observación','ERP + TMS + WMS','Pedidos y despachos'],
+['Almacenamiento','Nivel de cumplimiento de la identificación y organización de los lotes almacenados',0,DG+' · Almacenamiento','Nivel de cumplimiento','Guía de observación','WMS','Lotes y QR'],
+['Gestión de la información','Nivel de facilidad para transferir información entre áreas',0,DB+' · Gestión de la información','Nivel de facilidad','Cuestionario estructurado','Centro de integración','Registro de integración'],
+['Sistematización','Nivel de posibilidad de sistematización de los procesos',0,DB+' · Sistematización de la información','Nivel de posibilidad','Cuestionario estructurado','Centro de integración','Registro de procesos'],
+['Capacitación','Nivel de necesidad de capacitación del personal',0,DB+' · Capacitación','Nivel de necesidad','Formulario de entrevista','Administración','Usuarios y capacitaciones'],
+['Cumplimiento de tiempos','Nivel de cumplimiento de los plazos de entrega pactados (OTD)',1,'Desempeño de exportación · Cumplimiento de tiempos','Nivel de cumplimiento (OTD)','Ficha de pedidos y entregas','TMS','Entregas'],
+['Gestión de inventarios','Nivel de coincidencia entre el inventario físico y el registrado',1,'Desempeño de exportación · Gestión de inventarios','Nivel de coincidencia','Ficha de inventario','WMS','Inventarios y movimientos'],
+['Nivel de servicio','Nivel de cumplimiento de los pedidos registrados',1,'Desempeño de exportación · Nivel de servicio','Nivel de cumplimiento','Ficha de pedidos y entregas','WMS + ERP','Pedidos'],
+['Tiempo de respuesta','Nivel de rapidez de respuesta ante incidencias',1,'Desempeño de exportación · Tiempo de respuesta','Nivel de rapidez','Ficha de incidencias','TMS','Incidencias'],
+['Control de las operaciones','Frecuencia de incidencias durante las operaciones de exportación: baja, media o alta',1,'Desempeño de exportación · Control de las operaciones','Frecuencia','Ficha de incidencias','TMS','Incidencias'],
+['Seguimiento y mejora continua','Nivel de aplicación de acciones correctivas ante incidencias',1,'Desempeño de exportación · Seguimiento y mejora continua','Nivel de aplicación','Registro de acciones correctivas','Centro de integración','Acciones correctivas']];
+const LV=n=>n==11?['Baja','Media','Alta']:['Bajo','Medio','Alto'],inv=n=>n==6||n==11;
+const fav=(n,l)=>inv(n)?2-l:l,sc=(n,l)=>[38,64,90][fav(n,l)];
+const Z=IN.map((m,n)=>{sd=n*97+3;const a=sc(n,AN[n])+Math.round(RN()*6-3),d=sc(n,DS[n])+Math.round(RN()*6-3);return{a:cl(a),d:cl(d),h:ser(12,a,d,9),h2:ser(12,a*.9,a*.9+(d-a)*.3,9)}});
+const SH=IN.map((m,i)=>i+1);
+add('#gg',...IN.map((m,n)=>{const d=document.createElement('div');d.className='cd';d.style.padding='8px';d.innerHTML=`<small>${n+1}. ${m[0]}</small>`;const cv=mk({t:'gauge',dk:1,s:[{v:[Z[n].d]}]},96);cv.style.pointerEvents='none';d.append(cv);d.dataset.f=n;d.style.cursor='pointer';d.onmouseenter=()=>play(cv);return d}));
+add('#bic',cd('13 indicadores · antes vs después (índice de apoyo)',{t:'bar',dk:1,l:SH,s:[{n:'Antes',v:Z.map(z=>z.a),c:'#8a6c52'},{n:'Después',v:Z.map(z=>z.d),c:'#d9a85f'}],max:100},300),
+cd('Perfil de mejora',{t:'radar',dk:1,l:SH,max:100,s:[{n:'Antes',v:Z.map(z=>z.a),c:'#8a6c52'},{n:'Después',v:Z.map(z=>z.d),c:'#d9a85f'}]},300),
+cd('Tendencia conjunta · 12 meses',{t:'area',dk:1,l:MES,max:100,s:[{n:'Cadena de suministro',v:MES.map((_,i)=>Math.round(Z.slice(0,7).reduce((a,z)=>a+z.h[i],0)/7)),c:'#d9a85f'},{n:'Exportación',v:MES.map((_,i)=>Math.round(Z.slice(7).reduce((a,z)=>a+z.h[i],0)/6)),c:'#c2553a'}]},300),
+cd('Clasificación después',{t:'donut',dk:1,l:['Favorable','Intermedia','Desfavorable'],c:'13',s:[{v:[0,1,2].map(f=>IN.filter((_,n)=>fav(n,DS[n])==2-f).length)}]},300));
+IN.forEach((m,n)=>{const z=Z[n],L=LV(n),f=document.createElement('article');f.className='cd ix v'+m[2];f.dataset.f=n;f.style.cursor='pointer';
+f.innerHTML=`<header><i>${n+1}</i><div><h4>${m[1]}</h4><small>${m[0]}</small></div></header><div class="fl">
+<div><span>Variable</span>${m[2]?VD:VI}</div><div><span>Dimensión</span>${m[3]}</div><div><span>Medidor</span>${m[4]}</div><div><span>Técnica</span>${TEC(m[5])}</div>
+<div><span>Instrumento</span>${m[5]}</div><div><span>Escala ordinal</span>${L.join(' · ')}</div><div><span>Fuente de información</span>${m[6]}</div><div><span>Registro asociado</span>${m[7]}</div>
+<div><span>Resultado</span>${L[DS[n]]}</div><div><span>Clasificación</span><span class="bd b${fav(n,DS[n])}" style="display:inline-block;color:inherit">${['Desfavorable','Intermedia','Favorable'][fav(n,DS[n])]}</span></div></div><div class="cg"></div>
+<p style="margin:10px 0 0"><button class="bt" style="padding:7px 16px;font-size:12px" onclick="rep(${n})">Reporte del indicador</button></p><pre></pre>`;
+const g=f.querySelector('.cg');g.append(mk({t:'line',l:MES,max:100,s:[{n:'Historial',v:z.h}]},150),mk({t:'bar',l:['Antes','Después'],max:100,s:[{n:'Índice',v:[z.a,z.d]}]},150));f.querySelectorAll('canvas')[1]._c.s=[{n:'Antes',v:[z.a,0],c:'#8a6c52'},{n:'Después',v:[0,z.d],c:'#d9a85f'}];g.append(mk({t:'donut',l:L,c:n+1+'',s:[{v:[1,2,3].map(k=>Math.round(6+RN()*14*(k==DS[n]+1?3:1)))}]},150),mk({t:'gauge',s:[{v:[z.d]}]},150));$('#ixs').append(f)});
+window.rep=n=>{const L=k=>LV(k),t=k=>`${k+1}. ${IN[k][1]}\n   Antes: ${L(k)[AN[k]]} → Después: ${L(k)[DS[k]]} · apoyo ${Z[k].a}% → ${Z[k].d}%`;if(n!=null){document.querySelectorAll('#ixs pre')[n].textContent=t(n)+'\n   Fuente: '+IN[n][6]+'';return}
+$('#rp').textContent='REPORTE GERENCIAL · ANPROCA\nDirigido a: Félix Chuquimia Nina, Gerente General\n'+IN.map((_,k)=>t(k)).join('\n')+'\n\nPrioridades: '+DEC.filter(d=>d[5]<2).map(d=>d[0]).join('; ')};
+add('#bac',cd('Cadena de suministro (1-7)',{t:'bar',dk:1,l:SH.slice(0,7),max:100,s:[{n:'Antes',v:Z.slice(0,7).map(z=>z.a),c:'#8a6c52'},{n:'Después',v:Z.slice(0,7).map(z=>z.d),c:'#d9a85f'}]},280),cd('Exportación (8-13)',{t:'bar',dk:1,l:SH.slice(7),max:100,s:[{n:'Antes',v:Z.slice(7).map(z=>z.a),c:'#8a6c52'},{n:'Después',v:Z.slice(7).map(z=>z.d),c:'#d9a85f'}]},280));
+$('#bat').innerHTML='<thead><tr><th>Nº</th><th>Indicador</th><th>Antes</th><th>Después</th><th>Cambio de clasificación</th></tr></thead>'+IN.map((m,n)=>{const d=fav(n,DS[n])-fav(n,AN[n]);return`<tr><td>${n+1}</td><td>${m[1]}</td><td>${LV(n)[AN[n]]}</td><td>${LV(n)[DS[n]]}</td><td><span class="bd b${d>0?2:1}">${d>0?'Mejora':'Se mantiene'}</span></td></tr>`}).join('');
+
+/* 7.4 Mercados (cifras ilustrativas) */
+const PA=['Estados Unidos','Bélgica','Francia','Chile','Alemania','Países Bajos'],PT=['Nueva York','Amberes','Le Havre','San Antonio','Hamburgo','Róterdam'],DM=[92,76,70,58,88,74],RQ=['Registro FDA de planta','Certificado orgánico UE','Etiquetado UE y control de residuos','Certificado fitosanitario (SAG)','Certificado orgánico UE','Certificado de origen y control MRL'],CP=['Brasil','Colombia','Perú','Etiopía','Honduras'];sd=99;
+$('#mi').insertAdjacentHTML('afterend','<div class="card" style="margin-top:16px"><h3>Países importadores de café arábica</h3>'+tb(['País','Puerto de entrada','Demanda (índice)','Requisito clave'],PA.map((p,i)=>[p,PT[i],DM[i],RQ[i]]))+'</div>');
+add('#mc',cd('Precio de referencia · tendencia (índice 100 = inicio)',{t:'area',l:MES,s:[{n:'Arábica',v:ser(12,100,128,12)},{n:'Café de especialidad',v:ser(12,110,150,14),c:'#6b4429'}]},280),
+cd('Demanda internacional por país',{t:'hbar',l:PA,s:[{v:DM}]},300),cd('Participación de mercados',{t:'donut',l:PA,c:'6 mercados',s:[{v:[26,16,12,12,20,14]}]},280),
+cd('Competidores · posicionamiento',{t:'radar',max:100,l:['Precio','Calidad','Volumen','Certificaciones','Logística'],s:[{n:'ANPROCA',v:[70,86,40,66,58],c:'#d9a85f'},{n:'Competidor tipo',v:[62,74,92,80,85],c:'#6b4429'}]},280),
+cd('Competidores · volumen relativo',{t:'bar',l:CP,s:[{n:'Índice',v:[95,80,55,60,45]}]},280),cd('Oportunidades comerciales · potencial',{t:'hbar',l:['Especialidad','Orgánico','Comercio justo','Micro-lotes','Tostado'],s:[{v:[88,76,70,64,52]}]},280));
+[['Países importadores','Seleccionar mercados por afinidad con café de altura.'],['Requisitos de exportación','Referencia general: certificado fitosanitario, certificado de origen, factura comercial, lista de empaque, declaración aduanera y conocimiento de embarque. Verificar normativa vigente.'],['Precios de referencia','Seguimiento diario de bolsa y fuentes oficiales.'],['Tendencias','Mayor demanda de trazabilidad, lotes identificados y sostenibilidad.']].forEach(a=>add('#mi',Object.assign(document.createElement('div'),{className:'cd',innerHTML:`<h4>${a[0]}</h4><small>${a[1]}</small>`})));
+
+/* 7.5 Decisiones */
+const DEC=[['Baja coordinación de despachos entre áreas','3','Calendario único ERP-TMS-WMS','Reunión semanal de despachos','Félix Chuquimia Nina',1],['Frecuencia de incidencias en tránsito','12','Revisar tramos críticos','Plan de contingencia por tramo','Félix Chuquimia Nina',1],['Necesidad de capacitación del personal','7','Capacitar en registro en sistema','Taller práctico de ERP y WMS','Lizeth Marca',0],['Diferencias de inventario físico y registrado','9','Conteo cíclico con QR','Conciliación semanal por lote','Lizeth Marca',1],['Tiempo de respuesta ante incidencias','11','Protocolo de atención','Matriz de escalamiento','Félix Chuquimia Nina',2],['Identificación de lotes','4','Etiquetado QR obligatorio','Verificación al ingreso','Abednego Alipaz Mamani',2],['Calidad por lote','1','Catación antes del despacho','Ficha de laboratorio por lote','Abednego Alipaz Mamani',1],['Seguimiento de acciones correctivas','13','Tablero de seguimiento','Revisión mensual en gerencia','Félix Chuquimia Nina',0],['Retrasos en la frontera de Tambo Quemado','8','Anticipar trámites aduaneros','Pre-registro anticipado de documentos','Jorge Ticona',1],['Acopio en comunidades alejadas','1','Calendario de acopio por zona','Visitas quincenales a Taipiplaya, Nogalani y Uchumachi','Lucía Condori',1],['Pedidos con documentos incompletos','10','Lista de verificación de 7 documentos','Revisión documental antes de preparar','Verónica Limachi',2],['Transferencia de información entre áreas','5','Tablero compartido ERP-TMS-WMS','Actualización diaria del centro de integración','Rosa Mamani',2],['Procesos manuales sin sistematizar','6','Registrar el acopio directamente en el sistema','Digitalización de fichas de campo','Rosa Mamani',1],['Organización de lotes en almacén','4','Zonificación por lote y calidad','Reubicación y señalización de estantes','Mario Flores',2],['Mantenimiento de vehículos de carga','2','Revisión previa al viaje','Mantenimiento preventivo de la flota','Pedro Apaza',0]],EN=['Pendiente','En curso','Cerrada'];
+const dr=()=>{$('#dt').innerHTML=DEC.map((d,i)=>`<tr><td>${d[0]}</td><td>${d[1]}</td><td>${d[2]}</td><td>${d[3]}</td><td>${d[4]}</td><td><button class="tg b${d[5]}" onclick="DEC[${i}][5]=(DEC[${i}][5]+1)%3;dr()">${EN[d[5]]}</button></td></tr>`).join('');$('#dch').innerHTML='<h4>Seguimiento de acciones</h4>';$('#dch').append(mk({t:'donut',l:EN,dk:1,c:Math.round(DEC.filter(d=>d[5]==2).length/DEC.length*100)+'%',s:[{v:[0,1,2].map(k=>DEC.filter(d=>d[5]==k).length)}]},260))};dr();
+
+/* Galería infinita */
+const VW=['Evolución mensual','Antes vs después','Por tramo','Por área','Por lote','Distribución ordinal','Semáforo','Tendencia trimestral'],AR=['Acopio','Laboratorio','Almacén','Transporte','Comercial','Gerencia'],TR=['Caranavi-El Alto','El Alto-Frontera','Frontera-Puerto','Puerto-Destino'],TY=['line','area','bar','donut','radar','gauge','hbar'];let gi=0;
+function gen(i){sd=i*31+5;const n=i%13,v=VW[Math.floor(i/13)%8],t=TY[(i+Math.floor(i/13))%7],z=Z[n],m=IN[n][0],lb=t=='radar'?AR:t=='bar'||t=='hbar'?(i%2?AR:TR):MES,N=lb.length,b=cl(z.a+RN()*10-5),e=cl(z.d+RN()*8-4);
+const cfg=t=='donut'?{t,l:['Alto','Medio','Bajo'],c:n+1+'',s:[{v:[3,2,1].map(k=>Math.round(5+RN()*30))}]}:t=='gauge'?{t,s:[{v:[e]}]}:t=='hbar'?{t,l:lb,s:[{v:lb.map(()=>cl(b+RN()*(e-b+10)))}]}:{t,l:lb,max:100,s:t=='line'||t=='area'?[{n:'Después',v:ser(N,b,e,10)},{n:'Antes',v:ser(N,b-5,b+5,8),c:'#8a6c52'}]:[{n:'Antes',v:ser(N,b,b+4,14),c:'#8a6c52'},{n:'Después',v:ser(N,e-6,e,12)}]};
+return cd(`${n+1}. ${m}`,cfg,170,v+' · gráfico '+(i+1))}
+const more=()=>{const f=document.createDocumentFragment();for(let k=0;k<39;k++)f.append(gen(gi++));$('#gl').append(f);$('#cnt').textContent=400+gi*0+gi;$('#cnt').dataset.n=400+gi};more();
+new IntersectionObserver(e=>{if(e[0].isIntersecting)more()},{rootMargin:'900px'}).observe($('#sn'));
+
+/* ===== FUSIÓN: Inteligencia de Negocios dentro de la plataforma ===== */
+const POOL={};document.querySelectorAll('#pool>.bisec').forEach(e=>POOL[e.id]=e);
+const BIT=[['datos','Recopilación'],['bd','Base de datos'],['bi','Panel ejecutivo'],['ind','13 indicadores'],['ba','Antes y después'],['mer','Mercados'],['dec','Decisiones'],['gal','Galería']];
+function DBA(){const u=S.us[S.cu].n,r=[];
+S.pc.forEach(p=>r.push({id:'CMP-'+p.id,s:'ERP',t:'Compra',f:p.f,r:u,d:`${p.so} · ${p.n} sacos`,e:'Cerrado'}));
+S.lots.forEach(l=>r.push({id:l.id,s:'WMS',t:'Lote',f:l.f,r:u,d:`${l.n} sacos · ubicación ${l.loc}`,e:l.bl?'En proceso':'Cerrado'}));
+S.mv.forEach((m,i)=>r.push({id:'MOV-'+(i+1),s:'WMS',t:'Movimiento',f:m.h.slice(0,10),r:m.u,d:`${m.tp} ${m.l} ${m.q?m.q+' sacos':''}`,e:'Cerrado'}));
+S.o.forEach(o=>r.push({id:o.id,s:'ERP',t:'Pedido',f:o.f,r:u,d:`${cli(o.c).n} · ${o.n} sacos`,e:o.st=='Entregado'?'Cerrado':'En proceso'}));
+S.tr.forEach(t=>r.push({id:t.id,s:'TMS',t:'Ruta',f:(t.dep||today()).slice(0,10),r:u,d:`${RT[t.r].n} · ${t.st}`,e:t.st=='Entregado'?'Cerrado':'En proceso'}));
+S.ic.forEach(i=>r.push({id:i.id,s:'TMS',t:'Incidencia',f:today(),r:u,d:`${i.pt} · ${i.min} min · ${i.ca}`,e:i.st=='Abierto'?'Registrado':'Cerrado'}));
+return r.concat(DBX)}
+function alertas(){const rt=['A','B','C'].map(r=>[r,tot2(r,1)-tot2(r,2)]).sort((a,b)=>b[1]-a[1])[0];
+return kp([['Ruta crítica',RT[rt[0]].n.split('→')[1]],['Ahorro potencial',fm(rt[1])],['Disponible',tl(avail)+' sacos'],['Pedidos pendientes',S.o.filter(o=>o.st!='Entregado').length]])+`<div class="card"><h3>Alertas y recomendaciones (según datos registrados)</h3>${[tl(avail)<60?ic('box')+' Disponibilidad baja: programar nuevas compras.':ic('box')+' Disponibilidad suficiente para nuevos pedidos.',S.ic.filter(i=>i.st=='Abierto').length?ic('alert')+' Hay incidentes abiertos: priorizar acciones correctivas en fronteras.':ic('check')+' Sin incidentes abiertos.',S.o.some(o=>o.docs.includes(0)&&o.st!='Entregado')?ic('doc')+' Completar documentación de pedidos activos para evitar bloqueo de despacho.':ic('doc')+' Expedientes completos.',ic('truck')+` Priorizar la optimización de ${RT[rt[0]].n}: mayor ahorro de referencia (${fm(rt[1])}).`].map(x=>`<p>${x}</p>`).join('')}</div>`}
+V.bi=()=>`<div data-pool="${BIT[T][0]}"></div>`+(T==6?alertas():'');
+function beans(c){if(!c||c._b)return;c._b=1;const x=c.getContext('2d');let W,H,m=[.5,.5];const B2=Array.from({length:64},()=>({x:Math.random(),y:Math.random(),s:6+Math.random()*22,v:.00012+Math.random()*.0004,a:Math.random()*6.3,r:(Math.random()-.5)*.012,z:Math.random()}));
+const rs=()=>{W=c.width=c.clientWidth;H=c.height=c.clientHeight};rs();c.parentElement.onmousemove=e=>{const b=c.getBoundingClientRect();m=[(e.clientX-b.left)/(W||1),(e.clientY-b.top)/(H||1)]};
+(function f(){if(!c.isConnected)return;if(c.width!=c.clientWidth||c.height!=c.clientHeight)rs();x.clearRect(0,0,W,H);B2.forEach(b=>{b.y+=b.v;b.a+=b.r;if(b.y>1.1){b.y=-.1;b.x=Math.random()}const px=b.x*W+(m[0]-.5)*b.z*60,py=b.y*H;x.save();x.translate(px,py);x.rotate(b.a);x.globalAlpha=.14+b.z*.5;x.fillStyle=b.z>.6?'#b87b45':'#6b4429';x.beginPath();x.ellipse(0,0,b.s,b.s*.68,0,0,6.3);x.fill();x.strokeStyle='#170e09';x.lineWidth=b.s/9;x.beginPath();x.moveTo(-b.s*.8,0);x.bezierCurveTo(-b.s*.3,-b.s*.3,b.s*.3,b.s*.3,b.s*.8,0);x.stroke();x.restore()});if(!RM)requestAnimationFrame(f)})()}
+function hook(){document.querySelectorAll('canvas[data-c]').forEach(c=>{c._c=CF[+c.dataset.c];c.onmouseenter=()=>play(c);io.observe(c)});
+document.querySelectorAll('canvas.beans').forEach(beans);
+document.querySelectorAll('[data-pool]').forEach(p=>{const n=POOL[p.dataset.pool];if(!n)return;p.append(n)});
+if(M=='bi'&&BIT[T][0]=='bd'){rb();bdcr()}
+document.querySelectorAll('#v [data-pool] canvas').forEach(c=>c._c&&play(c));
+document.querySelectorAll('#v [data-n]').forEach(e=>co.observe(e))}
+addEventListener('resize',()=>document.querySelectorAll('canvas').forEach(c=>c._c&&c._c.t!='route'&&c._c.t!='flow'&&c.clientWidth&&draw(c,1)));
+beans($('#wl canvas.beans'));document.querySelectorAll('#wl [data-n]').forEach(e=>co.observe(e));
+/* ===== interacción: ampliar gráficos, abrir filas, fichas de indicador y buscador ===== */
+const mo=document.createElement('div');mo.id='mo';mo.innerHTML='<div class="mc"><button class="bt o x" id="mx">Cerrar ✕</button><h3 id="mt2"></h3><div id="mb2"></div></div>';document.body.append(mo);
+const cm=()=>mo.classList.remove('on');$('#mx').onclick=cm;mo.onclick=e=>{if(e.target==mo)cm()};
+addEventListener('keydown',e=>{if(e.key=='Escape')cm();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()=='k'){e.preventDefault();pal()}});
+function om(t,h){$('#mt2').textContent=t;$('#mb2').innerHTML='';$('#mb2').append(h);mo.classList.add('on')}
+function dtab(k){const L=k.l||[],n=Math.max(...k.s.map(s=>s.v.length));let r='';for(let i=0;i<n;i++)r+=`<tr><td>${L[i]!=null?L[i]:i+1}</td>${k.s.map(s=>`<td>${s.v[i]!=null?s.v[i]:''}</td>`).join('')}</tr>`;return`<div class="tw"><table><thead><tr><th>Dato</th>${k.s.map(s=>`<th>${s.n||'Valor'}</th>`).join('')}</tr></thead><tbody>${r}</tbody></table></div>`}
+function ficha(n){const m=IN[n],z=Z[n];sd=n*13+7;const rows=S.sc.map((s,i)=>{const v=cl(z.a+(z.d-z.a)*i/13+(RN()-.5)*10);return[s.n,s.mu,s.zo,v,['Desfavorable','Intermedia','Favorable'][v>74?2:v>49?1:0]]});
+const w=document.createElement('div');w.innerHTML=`<p><small>${m[3]}<br>Fuente: ${m[6]} · Registro: ${m[7]} · Instrumento: ${m[5]} · Técnica: ${TEC(m[5])}</small></p>`;
+const g=document.createElement('div');g.className='g2';g.append(cd('Registros por comunidad (14)',{t:'bar',max:100,l:S.sc.map(s=>s.n.replace('Com. ','').slice(0,9)),s:[{n:'Índice',v:rows.map(r=>r[3])}]},260),cd('Historial 12 meses',{t:'area',max:100,l:MES,s:[{n:'Índice',v:z.h}]},260),cd('Antes vs después',{t:'bar',max:100,l:['Antes','Después'],s:[{n:'Antes',v:[z.a,0],c:'#8a6c52'},{n:'Después',v:[0,z.d],c:'#d9a85f'}]},220),cd('Por zona',{t:'radar',max:100,l:[...new Set(S.sc.map(s=>s.zo))],s:[{n:'Índice',v:[...new Set(S.sc.map(s=>s.zo))].map(q=>Math.round(sum(rows.filter(r=>r[2]==q),r=>r[3])/rows.filter(r=>r[2]==q).length))}]},240));w.append(g);
+w.insertAdjacentHTML('beforeend',tb(['Socio','Municipio','Zona','Índice de apoyo','Clasificación'],rows));om(`${n+1}. ${m[1]}`,w)}
+document.addEventListener('click',e=>{const x=e.target;if(x.closest('#mo,#nv,header')||x.closest('button,input,select,a,label,textarea'))return;
+const f=x.closest('[data-f]');if(f&&!(x.closest('canvas')&&f.tagName=='ARTICLE'))return ficha(+f.dataset.f);
+const c=x.closest('canvas');if(c&&c._c&&c._c.t!='route'&&c._c.t!='flow'){const k=c._c,w=document.createElement('div');w.append(mk(k,380));w.insertAdjacentHTML('beforeend',dtab(k));const h=(c.closest('.cd,.card')||document).querySelector('h3,h4,small');return om(h?h.textContent:'Gráfico',w)}
+const r=x.closest('tbody tr');if(r&&r.closest('#v')&&r.cells.length>1){const hd=[...r.closest('table').rows[0].cells].map(q=>q.textContent),d=document.createElement('div');d.innerHTML='<div class="fl">'+[...r.cells].map((q,i)=>`<div><span>${hd[i]||''}</span>${q.innerHTML}</div>`).join('')+'</div>';om(r.cells[0].textContent+' · detalle',d)}});
+function pal(){const w=document.createElement('div'),all=MENU.flatMap(m=>m[3].length?m[3].map((s,i)=>[m[1]+' › '+s,m[0],i]):[[m[1],m[0],0]]);w.innerHTML='<input id="pq" placeholder="Escriba una sección: rutas, lotes, socios, indicadores…" style="width:100%"><div id="pl2"></div>';
+const f=()=>{const q=$('#pq').value.toLowerCase();$('#pl2').innerHTML='';all.filter(a=>a[0].toLowerCase().includes(q)&&ok(a[1])).slice(0,14).forEach(a=>{const b=document.createElement('button');b.className='bt o x';b.style.margin='6px 6px 0 0';b.textContent=a[0];b.onclick=()=>{cm();go(a[1],a[2])};$('#pl2').append(b)})};om('Ir a…',w);$('#pq').oninput=f;f();$('#pq').focus()}
+
+thm((function(){try{return localStorage.getItem('anp_th')||'d'}catch(e){return 'd'}})());R();
+
+/* ===== BI INTEGRADA (6.7): todo conectado a los datos reales de ERP, WMS y TMS ===== */
+MENU.push(['bix','BI INTEGRADA','chart',['Operación integrada','Recopilación ETL','Base de datos','Análisis','Alertas y niveles','Mercados','Decisiones','Puesta en marcha']]);
+for(const k in P)if(P[k]!='*')P[k]+=' bix';
+window._et=-1;window._lv=0;window._cl='';window._dp='';window._q='';window._tb=null;window._sv=null;
+const ini=()=>{S.xp=S.xp||{};S.xp.code=S.xp.code||'EXP-01.26';S.xl=S.xl||[];S.nv=S.nv||{seg:60,rep:150,max:600,ped:0};S.em=S.em||{n:300,min:100};S.dm=S.dm||[60,55,70,65,80,75,85,90,100,120,160,210];S.fe=S.fe||{};S.cn=S.cn||{};S.mk=S.mk||{w:[20,20,20,20,20],s:{}};S.fu=S.fu||{};S.im=S.im||{f:[0,0,0,0],p:[0,0,0,0]};S.dec=S.dec||[];S.bk=S.bk||'Sin respaldo'};
+const pn=(h,b)=>`<div class="card"><h3>${h}</h3>${b}</div>`,sp=(v,m)=>`<div style="background:var(--p);border-radius:8px;height:14px;overflow:hidden;margin:6px 0"><div style="width:${Math.min(100,Math.round(100*v/m))}%;height:100%;background:var(--g)"></div></div>`;
+const XS=[['1. Comprar café al socio','ERP→WMS',()=>{S.xp.l=compra(S.sc[0].n,60,330)},()=>S.xp.l],
+['2. Reservar pedido','ERP→WMS',()=>{const o=pedido(S.cl.find(c=>c.on).c,40,'B');if(o)S.xp.o=o.id},()=>S.xp.o],
+['3. Completar documentos','ERP',()=>{const o=S.o.find(x=>x.id==S.xp.o);o.docs=o.docs.map(_=>1);LG('ERP','Documentación completa '+o.id+' ('+S.xp.code+')')},()=>1],
+['4. Preparar y liberar','WMS→TMS',()=>{prep(S.xp.o);S.xp.t=(S.tr.find(t=>t.o==S.xp.o)||{}).id},()=>S.xp.t],
+['5. Salida del viaje','TMS→WMS',()=>salida(S.xp.t),()=>(S.tr.find(t=>t.id==S.xp.t)||{}).st=='En ruta'],
+['6. Incidente en frontera (opcional)','TMS→ERP',()=>inc('B','Tambo Quemado',390,'Demora en frontera'),()=>1],
+['7. Confirmar entrega','TMS→ERP',()=>entrega(S.xp.t),()=>(S.tr.find(t=>t.id==S.xp.t)||{}).st=='Entregado'],
+['8. Cargar a BI','ETL',()=>etl(),()=>S.dw]];
+function xr(i){const x=S.xp;x.d=x.d||[];try{XS[i][2]()}catch(e){}if(XS[i][3]()){x.d[i]=1;LG('BI',x.code+': '+XS[i][0]);save()}R()}
+function xn(){const n=+S.xp.code.slice(4,6)+1;S.xl.push({c:S.xp.code,l:S.xp.l,o:S.xp.o,t:S.xp.t});S.xp={code:'EXP-'+String(n).padStart(2,'0')+'.26'};save();R()}
+function etl(){const dp=a=>a.length-new Set(a.map(x=>x.id)).size,v=[['Lotes sin ubicación',S.lots.filter(l=>!l.loc).length],['Pedidos sin cliente válido',S.o.filter(o=>!S.cl.find(c=>c.c==o.c)).length],['Viajes iniciados sin fecha de salida',S.tr.filter(t=>t.st!='Programado'&&!t.dep).length],['Registros duplicados',dp(S.lots)+dp(S.o)+dp(S.tr)]];S.dw={t:nw(),l:S.lots.length,p:S.o.length,v:S.tr.length,i:S.ic.length,m:S.mv.length,vr:v,err:sum(v,x=>x[1]),est:[...new Set([...S.o.map(o=>o.st),...S.tr.map(t=>t.st)])]};LG('ETL','Carga a base analítica: '+S.dw.l+' lotes, '+S.dw.p+' pedidos, '+S.dw.v+' viajes, '+S.dw.i+' incidencias');save()}
+function etr(){_et=0;R();const iv=setInterval(()=>{_et++;if(_et>=5){clearInterval(iv);etl()}R()},700)}
+function trz(q){q=q.trim().toUpperCase();const xe=S.xl.concat([S.xp]).find(e=>e.c==q);if(xe)q=xe.o||xe.l||xe.t||q;let O=S.o.filter(o=>o.id==q||o.lots[q]||(S.tr.find(t=>t.id==q)||{}).o==o.id).map(o=>o.id),T=S.tr.filter(t=>t.id==q||O.includes(t.o)),L=[...new Set(S.o.filter(o=>O.includes(o.id)).flatMap(o=>Object.keys(o.lots)).concat(S.lots.filter(l=>l.id==q).map(l=>l.id)))];return{O,T,L}}
+const sit0=()=>{const N=S.nv,v=_sv==null?tl(avail):_sv;return[v,v<N.ped?'Faltante':v<N.rep?'Reposición':v>N.max?'Exceso':'Nivel adecuado']};
+const ALS=()=>{const[v,s]=sit0();return[['Faltante o reposición',s=='Faltante'||s=='Reposición','Acopio y ventas'],['Exceso de inventario',s=='Exceso','Almacén y ventas'],['Viaje con retraso',S.ic.some(i=>i.st=='Abierto')&&S.tr.some(t=>t.st=='En ruta'),'Logística, almacén y ventas'],['Entrega en riesgo',S.ic.some(i=>i.st=='Abierto'&&i.min>=60),'Ventas y gerencia'],['Humedad fuera de rango (10–12%)',S.lots.some(l=>l.hu<10||l.hu>12),'Almacén y calidad'],['Documento pendiente',S.o.some(o=>o.docs.includes(0)&&o.st!='Entregado'),'Exportaciones'],['Incidente grave (≥180 min)',S.ic.some(i=>i.st=='Abierto'&&i.min>=180),'Logística y gerencia'],['Sacos por agotarse',S.em.n<=S.em.min,'Compras']]};
+const adec=(p,a,r)=>{if(!S.dec.some(d=>d.p==p&&d.e<4))S.dec.push({p,a,r,e:0,rec:0,f:nw()});LG('Decisiones','Autorizada: '+p);save();toast('Enviada a Decisiones');R()};
+V.bix=()=>{ini();const ES=['Reservado','Preparado','En transporte','Entregado'];
+if(T==0){const x=S.xp,d=x.d=x.d||[],o=S.o.find(a=>a.id==x.o),l=S.lots.find(a=>a.id==x.l),t=S.tr.find(a=>a.id==x.t),en=i=>i==0?1:i==6?d[4]:d[i-1],rs=S.lg.filter(g=>[x.l,x.o,x.t].some(k=>k&&g.m.includes(k))).slice(0,10);
+return `<div class="card"><h3>Exportación <span class="bd g">${x.code}</span> · un código guía todos los sistemas</h3><div class="fr">${XS.map((s,i)=>`<button class="bt ${d[i]?'s':''}" ${!en(i)||d[i]?'disabled':''} onclick="xr(${i})">${d[i]?'✓ ':''}${s[0]}<br><small>${s[1]}</small></button>`).join('')}</div><button class="bt o" onclick="xn()">Nueva exportación ▶</button> <small>Cada botón ejecuta la operación real: lo que registra un sistema aparece en los otros.</small></div>
+<div class="g3">${pn('ERP',o?`Cliente: ${cli(o.c).n}<br>Pedido: <b>${o.id}</b> ${B(o.st)}<br>Documentos: ${o.docs.filter(v=>v).length}/7${sp(o.docs.filter(v=>v).length,7)}`:'Sin pedido aún')}${pn('WMS',l?`Lote: <b>${l.id}</b> · ${l.n} sacos<br>Ubicación: ${l.loc}<br>Movimientos: ${S.mv.filter(m=>m.l==l.id).length}<br>Estado: ${o?B(o.st):B('Disponible')}`:'Sin lote aún')}${pn('TMS',t?`Viaje: <b>${t.id}</b> ${B(t.st)}<br>${RT[t.r].n}<br>Incidentes abiertos: ${S.ic.filter(i=>i.r==t.r&&i.st=='Abierto').length}`:'Sin viaje aún')}</div>
+${pn('Rastro del código '+x.code+' en los tres sistemas',rs.length?tb(['Fecha','Flujo','Detalle'],rs.map(g=>[g.t,g.s,g.m])):'Ejecute el paso 1 para empezar.')}`}
+if(T==1){const w=S.dw,ST=['Registro','Extracción','Validación','Transformación','Carga'];
+return pn('Fuentes registradas una sola vez',kp([['ERP: socios, clientes, compras, pedidos',S.sc.length+S.cl.length+S.pc.length+S.o.length],['WMS: lotes y movimientos',S.lots.length+S.mv.length],['TMS: viajes e incidencias',S.tr.length+S.ic.length]]))+pn('Proceso ETL',`<div class="fr">${ST.map((s,i)=>`<div class="k" style="min-width:110px;${i<=_et?'background:var(--g);color:#fff':''}"><b>${i+1}</b><span>${s}</span></div>`).join('→')}</div><button class="bt" onclick="etr()">Ejecutar ETL ahora</button>`)+(w?pn('Resultado de la última carga ('+w.t+')',kp([['Lotes',w.l],['Pedidos',w.p],['Viajes',w.v],['Incidencias',w.i],['Movimientos',w.m],['Registros con error',w.err]])+tb(['Regla de validación','Registros afectados'],w.vr)+`<p>Catálogo único de estados: ${w.est.map(e=>B(e)).join(' ')}</p>`):'')}
+if(T==2){const q=_q,r=q?trz(q):null,EN=[['Socios acopiadores',S.sc.length],['Lotes de café',S.lots.length],['Pedidos',S.o.length],['Inventario y movimientos',S.mv.length],['Viajes y transporte',S.tr.length],['Exportaciones y documentos',S.xl.length+(S.xp.o?1:0)],['Incidencias y acciones',S.ic.length]];
+return pn('Rastrear por código de lote, pedido, viaje o EXP',`<div class="fr"><input id="qq" value="${q}" placeholder="L-2601, P-100, V-100 o EXP-01.26" style="flex:1"><button class="bt" onclick="_q=fv('qq');R()">Rastrear</button></div>`+(r?(r.O.length||r.L.length||r.T.length?`<div class="g3">${pn('Lotes',r.L.join('<br>')||'–')}${pn('Pedidos',r.O.map(i=>i+' '+B(S.o.find(o=>o.id==i).st)).join('<br>')||'–')}${pn('Viajes',r.T.map(t=>t.id+' '+B(t.st)).join('<br>')||'–')}</div>`:'<p>Sin coincidencias.</p>'):''))+pn('Entidades de la base analítica',kp(EN.map(e=>[e[0],e[1]]))+`<small>Claves: código de lote, n.º de pedido y n.º de viaje.</small>`)+pn('Seguridad',`Último respaldo: <b>${S.bk}</b> <button class="bt s" onclick="S.bk=nw();LG('BD','Respaldo realizado');save();R()">Respaldar ahora</button>`)}
+if(T==3){const LV=['Descriptivo','Diagnóstico','Predictivo','Prescriptivo','Indicadores'],al=ALS();let h=`<div class="fr">${LV.map((x,i)=>`<button class="bt ${i==_lv?'':'o'}" onclick="_lv=${i};R()">${x}</button>`).join('')}</div>`;
+if(_lv==0){const f=S.o.filter(o=>!_cl||o.c==_cl);h+=pn('¿Qué pasó? Filtre por comprador',`<select onchange="_cl=this.value;R()"><option value="">Todos</option>${S.cl.map(c=>`<option value="${c.c}" ${c.c==_cl?'selected':''}>${c.n}`).join('')}</select>${bars(ES,ES.map(e=>f.filter(o=>o.st==e).length))}`+tb(['Pedido','Cliente','Sacos','Estado'],f.map(o=>[o.id,cli(o.c).n,o.n,B(o.st)])))}
+if(_lv==1){const o=S.o.find(a=>a.id==_dp)||S.o[0];if(o){const t=S.tr.find(a=>a.o==o.id),ic=t?S.ic.filter(i=>i.r==t.r&&i.st=='Abierto'):[],pd=o.docs.map((v,i)=>v?'':DOCS[i]).filter(Boolean),E=[['Confirmado',1],['Preparado',o.st!='Reservado'],['Salida',t&&t.dep],['Entrega',o.st=='Entregado']];h+=pn('¿Por qué pasó? Elija un pedido',`<select onchange="_dp=this.value;R()">${S.o.map(a=>`<option ${a.id==o.id?'selected':''}>${a.id}`).join('')}</select><div class="fr">${E.map(e=>`<div class="k"><b>${e[1]?'✓':'…'}</b><span>${e[0]}</span></div>`).join('→')}</div><p><b>Causa probable:</b> ${pd.length?'Documentación pendiente: '+pd.join(', '):o.st=='Reservado'?'Alistamiento pendiente en WMS':ic.length?'Transporte: '+sum(ic,i=>i.min)+' min perdidos':'Sin desviación detectada'}</p>`)}else h+=pn('Diagnóstico','Ejecute una operación primero.')}
+if(_lv==2){const d=S.dm,n=d.length,tr=d.slice(0,n-3),h3=d.slice(-3),f=(x,a)=>{const m=a.length,sx=a.reduce((s,_,i)=>s+i,0),sy=sum(a,v=>v),sxy=a.reduce((s,v,i)=>s+i*v,0),sxx=a.reduce((s,_,i)=>s+i*i,0),b=(m*sxy-sx*sy)/(m*sxx-sx*sx);return(sy-b*sx)/m+b*x},pr=h3.map((_,i)=>f(n-3+i,tr)),av=sum(tr,v=>v)/tr.length,ma=a=>sum(h3.map((v,i)=>Math.abs(v-a[i])),x=>x)/3,mp=a=>100*sum(h3.map((v,i)=>Math.abs(v-a[i])/v),x=>x)/3,bs=h3.map(_=>av);h+=pn('¿Qué podría pasar? Edite la demanda mensual (sacos)',`<div class="fr">${d.map((v,i)=>`<label>M${i+1}<input type="number" value="${v}" style="width:70px" onchange="S.dm[${i}]=+this.value;save();R()"></label>`).join('')}</div>${kp([['MAE tendencia',ma(pr).toFixed(1)],['MAPE tendencia',mp(pr).toFixed(1)+'%'],['MAE promedio',ma(bs).toFixed(1)],['MAPE promedio',mp(bs).toFixed(1)+'%']])}<p>${ma(pr)<ma(bs)?B('Aprobad')+' Supera al promedio histórico':B('Pendiente')+' No supera al promedio'}</p>${bars(['M'+(n+1),'M'+(n+2),'M'+(n+3)],[0,1,2].map(i=>Math.round(Math.max(0,f(n+i,d)))))}<small>Estimación de tendencia, preliminar. Prophet real corre en la base analítica con varias campañas. Datos de ejemplo.</small>`)}
+if(_lv==3){const RU=[['Inventario bajo el punto de reposición','Programar el abastecimiento','Acopio y gerencia',al[0][1]],['Pedido próximo y viaje retrasado','Priorizar seguimiento y evaluar alternativa logística','Logística y ventas',al[2][1]],['Lote con calidad no compatible','Evitar su asignación hasta verificar','Almacén y calidad',al[4][1]],['Documento obligatorio pendiente','Regularizar el expediente antes del despacho','Exportaciones',al[5][1]]];h+=pn('¿Qué conviene hacer? El sistema recomienda, usted autoriza',tb(['Condición','Recomendación','Responsable','Estado',''],RU.map(r=>[r[0],r[1],r[2],r[3]?B('Abierto')+' Activa':B('Cerrad')+' Sin alerta',r[3]?`<button class="bt s" onclick="adec('${r[0]}','${r[1]}','${r[2]}')">Autorizar</button>`:'–'])))}
+if(_lv==4){const en=S.o.filter(o=>o.st=='Entregado'),ok=o=>S.fe[o.id]!=0,cm=o=>sum(Object.values(o.lots),v=>v[1])==o.n,pf=o=>ok(o)&&cm(o)&&!o.docs.includes(0)&&Object.keys(o.lots).every(k=>{const l=S.lots.find(x=>x.id==k);return l&&l.hu>=10&&l.hu<=12}),P1=a=>a.length?Math.round(100*a.length/Math.max(1,en.length))+'%':'0%',ct=S.lots.filter(l=>S.cn[l.id]!=null&&S.cn[l.id]!=='');h+=kp([['Entregas a tiempo',en.length?P1(en.filter(ok)):'–'],['Pedidos completados',en.length?P1(en.filter(o=>ok(o)&&cm(o))):'–'],['Pedido perfecto',en.length?P1(en.filter(pf)):'–'],['Exactitud de inventario',ct.length?Math.round(100*ct.filter(l=>+S.cn[l.id]==stock(l)).length/ct.length)+'%':'–'],['Incidencias',S.ic.length],['Min perdidos por incidente',S.ic.length?Math.round(sum(S.ic,i=>i.min)/S.ic.length):0],['Acciones cerradas',S.ic.length?Math.round(100*S.ic.filter(i=>i.st=='Cerrado').length/S.ic.length)+'%':'–']])+pn('Registre lo ocurrido y los indicadores se recalculan',tb(['Pedido','Estado','Fecha cumplida','Perfecto'],S.o.map(o=>[o.id,B(o.st),`<button class="bt s" onclick="S.fe['${o.id}']=${ok(o)?0:1};save();R()">${ok(o)?'Cumplida ✓':'Incumplida'}</button>`,pf(o)?'Sí':'No']))+tb(['Lote','Sacos en sistema','Conteo físico'],S.lots.map(l=>[l.id,stock(l),`<input type="number" value="${S.cn[l.id]??''}" style="width:90px" onchange="S.cn['${l.id}']=this.value;save();R()">`])))}
+return h}
+if(T==4){const N=S.nv,[v,s]=sit0(),mx=Math.max(N.max*1.3,v),al=ALS(),AC={Faltante:'Alerta a acopio y ventas y solicitud de compra',Reposición:'Orden de compra a socios y aviso a ventas',['Nivel adecuado']:'Mantener el ritmo',Exceso:'Suspender compras y ofrecer a compradores habituales'};
+return pn('Nivel de inventario: mueva el deslizador y vea la acción del sistema',`<input type="range" min="0" max="${Math.round(mx)}" value="${v}" oninput="_sv=+this.value;R()" style="width:100%"><div style="position:relative;height:22px;background:var(--p);border-radius:8px">${[['seg',N.seg],['rep',N.rep],['max',N.max]].map(x=>`<span style="position:absolute;left:${100*x[1]/mx}%;top:0;height:100%;border-left:2px solid var(--g)"><small>${x[0]}</small></span>`).join('')}<span style="position:absolute;left:0;top:0;height:100%;width:${100*v/mx}%;background:var(--g);opacity:.4;border-radius:8px"></span></div><p><b>${v} sacos</b> ${B(s=='Nivel adecuado'?'Activo':'Abierto')} <b>${s}</b>: ${AC[s]}</p><div class="fr">${[['seg','Seguridad'],['rep','Reposición'],['max','Máximo'],['ped','Pedidos por cubrir']].map(x=>`<label>${x[1]}<input type="number" value="${N[x[0]]}" style="width:90px" onchange="S.nv.${x[0]}=+this.value;save();R()"></label>`).join('')}<button class="bt s" onclick="_sv=null;R()">Volver al stock real</button><button class="bt" onclick="adec('Inventario: ${s}','${AC[s]}','Acopio y ventas')">Ejecutar acción</button></div>`)+pn('Empaque de yute o fique',`${S.em.n} sacos (mínimo ${S.em.min}) ${S.em.n<=S.em.min?B('Abierto')+' Por agotarse':B('Activo')}${sp(S.em.n,S.em.min*3)}<div class="fr"><button class="bt" onclick="S.em.n+=100;LG('ERP','Compra 100 sacos de fique');save();R()">Comprar 100</button><button class="bt s" onclick="S.em.n=Math.max(0,S.em.n-30);save();R()">Usar 30</button></div>`)+`<div class="g3">${al.map(a=>`<div class="card" style="border-left:6px solid ${a[1]?'#b3392f':'var(--g)'}"><b>${a[0]}</b><br>${a[1]?B('Abierto')+' Activa':B('Cerrad')+' Sin alerta'}<br><small>${a[2]}</small></div>`).join('')}</div>`}
+if(T==5){const ds=[...new Set(S.cl.map(c=>c.p))],CR=['Demanda','Precio de referencia','Costo logístico','Requisitos','Rentabilidad'],FU=['Trade Map (ITC)','IBCE','ICO','Trading Economics'],W=S.mk.w,sc=d=>CR.reduce((s,_,i)=>s+W[i]*(S.mk.s[d+i]||0),0)/100,rk=ds.slice().sort((a,b)=>sc(b)-sc(a));
+return pn('Matriz de evaluación: puntaje 1 a 5 por criterio',`<div class="fr">${CR.map((c,i)=>`<label>${c} %<input type="number" value="${W[i]}" style="width:65px" onchange="S.mk.w[${i}]=+this.value;save();R()"></label>`).join('')}</div>${sum(W,x=>x)!=100?B('Error')+' Ponderación suma '+sum(W,x=>x)+' (debe ser 100)':''}${tb(['Destino',...CR,'Puntaje'],ds.map(d=>[d,...CR.map((_,i)=>`<select onchange="S.mk.s['${d}${i}']=+this.value;save();R()">${[0,1,2,3,4,5].map(n=>`<option ${(S.mk.s[d+i]||0)==n?'selected':''}>${n}`).join('')}</select>`),'<b>'+sc(d).toFixed(2)+'</b>']))}${bars(rk,rk.map(d=>+sc(d).toFixed(2)))}<small>Compara alternativas; no declara por sí sola el mejor destino ni reemplaza precios contractuales.</small>`)+pn('Consulta mensual de fuentes (carga manual)',tb(['Fuente','Última consulta',''],FU.map(f=>[f,S.fu[f]||'Sin registrar',`<button class="bt s" onclick="S.fu['${f}']=nw();save();R()">Registrar</button>`])))}
+if(T==6){const EV=['Identificada','Decidida','Ejecutada','Evaluada'];return pn('Ciclo: revisar → identificar → decidir → ejecutar → evaluar',`<form onsubmit="event.preventDefault();adec(fv('dp'),fv('da'),fv('dr'))"><label>Desviación<input id="dp" required></label><label>Acción<input id="da" required></label><label>Responsable<input id="dr" required></label><button class="bt">Registrar decisión</button></form>`)+pn('Seguimiento',S.dec.length?tb(['Desviación','Acción','Responsable','Etapa','Reapareció',''],S.dec.map((d,i)=>[d.p,d.a,d.r,B(EV[Math.min(d.e,3)]),d.e>=3?`<button class="bt s" onclick="S.dec[${i}].rec^=1;save();R()">${d.rec?'Sí':'No'}</button>`:'–',d.e<3?`<button class="bt s" onclick="S.dec[${i}].e++;save();R()">Avanzar</button>`:'–'])):'Sin decisiones: autorice una recomendación en Análisis o Alertas.')}
+const FA=[['Integración y calidad de datos','Registros completos y trazables'],['Tableros e indicadores','Indicadores revisados'],['Pronóstico de demanda','Error aceptable frente al promedio'],['Reglas y mejora continua','Recomendaciones verificadas']],PU=['Los datos de los sistemas coinciden con los tableros','Los indicadores usan las fórmulas aprobadas','Las alertas se activan con las condiciones definidas','Cada usuario ve solo lo que le corresponde'],f=S.im.f,p=S.im.p;
+return pn('Pruebas previas',PU.map((t,i)=>`<label style="display:flex;gap:8px;margin:4px 0"><input type="checkbox" style="width:auto" ${p[i]?'checked':''} onchange="S.im.p[${i}]=this.checked?1:0;save();R()"> ${t}</label>`).join(''))+pn('Fases (se desbloquean al aceptar la anterior)',FA.map((x,i)=>{const lk=i>0&&!f[i-1]||!p.every(v=>v);return `<p>${f[i]?B('Complet'):lk?B('Bloq')+' Bloqueada':B('Pendiente')} <b>Fase ${i+1}: ${x[0]}</b> <small>${x[1]}</small> <button class="bt s" ${lk?'disabled':''} onclick="S.im.f[${i}]^=1;LG('BI','Fase ${i+1} aceptada');save();R()">${f[i]?'Revertir':'Aceptar'}</button></p>`}).join('')+sp(f.filter(x=>x).length,4))};
+
+</script></body></html>
